@@ -16,11 +16,12 @@ conda env create -f environment.yml
 conda activate graphbench
 # 2) (Optional) upgrade pip
 python -m pip install -U pip
-# 3) Install PyG + companions for cpu only
+# 3) If an error occured due to mismatch of sympy please do this
+pip install "sympy==1.13.1"
+# 4) Install PyG + companions for cpu only
 # set the variable automatically
 TV=$(python -c "import torch; print(torch.__version__.split('+')[0])")
 pip install -U fsspec torch-geometric
 pip install -U pyg-lib torch-scatter torch-sparse torch-cluster torch-spline-conv \
   -f https://data.pyg.org/whl/torch-${TV}+cpu.html
-#4) If an error occured due to mismatch of sympy please do this
-pip install "sympy==1.13.1"
+
