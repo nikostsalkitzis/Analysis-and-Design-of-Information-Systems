@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" font-family="sans-serif" font-size="12">
+<rect x="0" y="0" width="600" height="400" fill="#ffffff"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="344.00" text-anchor="end" fill="#000000">0.47</text>
+<line x1="60" y1="270.00" x2="580" y2="270.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="274.00" text-anchor="end" fill="#000000">0.605</text>
+<line x1="60" y1="200.00" x2="580" y2="200.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="204.00" text-anchor="end" fill="#000000">0.741</text>
+<line x1="60" y1="130.00" x2="580" y2="130.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="134.00" text-anchor="end" fill="#000000">0.876</text>
+<line x1="60" y1="60.00" x2="580" y2="60.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="64.00" text-anchor="end" fill="#000000">1.01</text>
+<line x1="60" y1="60" x2="60" y2="340" stroke="#000000" stroke-width="1.5"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#000000" stroke-width="1.5"/>
+<line x1="60.00" y1="340.00" x2="60.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="60.00" y="360.00" text-anchor="middle" fill="#000000">16</text>
+<line x1="94.67" y1="340.00" x2="94.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="94.67" y="360.00" text-anchor="middle" fill="#000000">32</text>
+<line x1="164.00" y1="340.00" x2="164.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="164.00" y="360.00" text-anchor="middle" fill="#000000">64</text>
+<line x1="302.67" y1="340.00" x2="302.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="302.67" y="360.00" text-anchor="middle" fill="#000000">128</text>
+<line x1="580.00" y1="340.00" x2="580.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="580.00" y="360.00" text-anchor="middle" fill="#000000">256</text>
+<polygon points="60.00,72.73 94.67,93.82 164.00,163.06 302.67,309.19 580.00,97.30 580.00,133.01 302.67,327.27 164.00,210.23 94.67,120.60 60.00,98.29" fill="#d62728" opacity="0.2" stroke="none"/>
+<polyline points="60.00,85.51 94.67,107.21 164.00,186.65 302.67,318.23 580.00,115.16" fill="none" stroke="#d62728" stroke-width="2"/>
+<circle cx="60.00" cy="85.51" r="3" fill="#d62728" stroke="none"/>
+<circle cx="94.67" cy="107.21" r="3" fill="#d62728" stroke="none"/>
+<circle cx="164.00" cy="186.65" r="3" fill="#d62728" stroke="none"/>
+<circle cx="302.67" cy="318.23" r="3" fill="#d62728" stroke="none"/>
+<circle cx="580.00" cy="115.16" r="3" fill="#d62728" stroke="none"/>
+<polygon points="60.00,84.38 94.67,81.80 164.00,174.00 302.67,175.19 580.00,112.61 580.00,129.34 302.67,206.02 164.00,200.36 94.67,92.38 60.00,114.17" fill="#1f77b4" opacity="0.2" stroke="none"/>
+<polyline points="60.00,99.27 94.67,87.09 164.00,187.18 302.67,190.60 580.00,120.97" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.00" cy="99.27" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="94.67" cy="87.09" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="164.00" cy="187.18" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="302.67" cy="190.60" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="580.00" cy="120.97" r="3" fill="#1f77b4" stroke="none"/>
+<rect x="460" y="70" width="12" height="12" fill="#d62728" opacity="0.6" stroke="#d62728" stroke-width="2"/>
+<text x="478" y="80" fill="#000000">MLP</text>
+<rect x="460" y="88" width="12" height="12" fill="#1f77b4" opacity="0.6" stroke="#1f77b4" stroke-width="2"/>
+<text x="478" y="98" fill="#000000">SVM</text>
+<text x="300.00" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000">MUTAG — ROC-AUC vs. Dim (netlsd) (n_seeds=3)</text>
+<text x="320.00" y="380" text-anchor="middle" fill="#000000">Embedding dimension</text>
+<text x="20" y="200.00" transform="rotate(-90 20,200.00)" text-anchor="middle" fill="#000000">ROC-AUC (macro OvR, mean ± std)</text>
+</svg>

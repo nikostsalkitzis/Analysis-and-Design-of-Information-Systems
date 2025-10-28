@@ -9,29 +9,27 @@ Goal:
   generalize to another (target).
 
 Methods: Graph2Vec, NetLSD, GIN
-Datasets: MUTAG, ENZYMES, IMDB-MULTI
+Datasets: MUTAG, ENZYMES, IMDB-MULTI (or whatever you pass)
 
 Metrics:
   - Accuracy, F1, AUC on target dataset
-  - ΔAUC_transfer = AUC_within − AUC_cross
+  - Δ metrics = (within on source) − (transfer to target)
 
-Visualizations:
-  - Heatmap of transfer AUCs (source → target)
-  - Barplots per method
-  - Scatter plots of within vs. transfer AUC
+Visualizations (updated per request):
+  - Heatmap: source → target scores (keeps within + transfer)
+  - Barplots: ONLY cross-dataset (src != tgt), grouped by src→tgt
+  - Scatter: ONLY cross-dataset (src != tgt), showing within(src) vs transfer(src→tgt)
 
 Outputs:
   - report/tables/transfer_results.csv
-  - report/figures/transfer_heatmap_*.png
-  - report/figures/transfer_barplot_*.png
-  - report/figures/transfer_scatter.png
+  - report/figures/...
 """
 
 # ---------------- Headless plotting ----------------
 import matplotlib
 matplotlib.use("Agg")
 
-import os, time, argparse, warnings, random
+import os, argparse, warnings, random
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -52,7 +50,6 @@ from torch_geometric.nn import GINConv, global_mean_pool
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, label_binarize
-from sklearn.svm import LinearSVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
@@ -65,8 +62,8 @@ if not hasattr(sp, "errstate"):
 # ---------------------------------------------------
 
 # ---------------- Paths ----------------
-OUT_DIR_TABLES = "report/tables"
-OUT_DIR_FIGS   = "report/figures"
+OUT_DIR_TABLES = "report_transfer/tables"
+OUT_DIR_FIGS   = "report_transfer/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
 
@@ -90,10 +87,21 @@ def ensure_node_features(graphs):
     return out
 
 def auc_any(y_true, scores, classes):
+    """
+    Handles binary and multi-class AUC, returns np.nan if it can't compute.
+    """
     try:
         if len(classes) == 2:
-            return roc_auc_score(y_true, scores[:, 1] if scores.ndim > 1 else scores)
+            # binary
+            if scores is None:
+                return np.nan
+            if scores.ndim > 1:
+                return roc_auc_score(y_true, scores[:, 1])
+            return roc_auc_score(y_true, scores)
         else:
+            # multiclass macro-ovr
+            if scores is None:
+                return np.nan
             Y = label_binarize(y_true, classes=classes)
             return roc_auc_score(Y, scores, average="macro", multi_class="ovr")
     except Exception:
@@ -113,7 +121,14 @@ def to_nx_with_labels(ds_slice):
 
 def embed_graph2vec(graphs, dim=128, seed=0):
     Gs = to_nx_with_labels(graphs)
-    model = Graph2Vec(dimensions=dim, wl_iterations=2, epochs=20, seed=seed, workers=1, min_count=5)
+    model = Graph2Vec(
+        dimensions=dim,
+        wl_iterations=2,
+        epochs=20,
+        seed=seed,
+        workers=1,
+        min_count=5
+    )
     model.fit(Gs)
     return model.get_embedding()
 
@@ -200,20 +215,39 @@ def get_embeddings(method, graphs, dim, seed):
 
 
 # ---------------- Classifier & evaluation ----------------
-def eval_classifier(X_train, y_train, X_test, y_test, seed):
-    classes = np.unique(y_train)
-    clf = make_pipeline(StandardScaler(with_mean=True), MLPClassifier(hidden_layer_sizes=(128,),
-                                                                      activation="relu",
-                                                                      solver="adam",
-                                                                      max_iter=500,
-                                                                      random_state=seed))
-    clf.fit(X_train, y_train)
-    y_pred = clf.predict(X_test)
-    y_score = clf.predict_proba(X_test) if hasattr(clf, "predict_proba") else None
+def fit_clf(X, y, seed):
+    clf = make_pipeline(
+        StandardScaler(with_mean=True),
+        MLPClassifier(
+            hidden_layer_sizes=(128,),
+            activation="relu",
+            solver="adam",
+            max_iter=500,
+            random_state=seed
+        )
+    )
+    clf.fit(X, y)
+    return clf
 
-    acc = accuracy_score(y_test, y_pred)
-    f1  = f1_score(y_test, y_pred, average="macro")
-    auc = auc_any(y_test, y_score, classes=np.unique(y_test))
+def eval_within(X, y, seed):
+    clf = fit_clf(X, y, seed)
+    y_pred = clf.predict(X)
+    y_score = clf.predict_proba(X) if hasattr(clf, "predict_proba") else None
+
+    acc = accuracy_score(y, y_pred)
+    f1  = f1_score(y, y_pred, average="macro")
+    auc = auc_any(y, y_score, classes=np.unique(y))
+
+    return clf, acc, f1, auc
+
+def eval_transfer(clf, X_tgt, y_tgt):
+    y_pred = clf.predict(X_tgt)
+    y_score = clf.predict_proba(X_tgt) if hasattr(clf, "predict_proba") else None
+
+    acc = accuracy_score(y_tgt, y_pred)
+    f1  = f1_score(y_tgt, y_pred, average="macro")
+    auc = auc_any(y_tgt, y_score, classes=np.unique(y_tgt))
+
     return acc, f1, auc
 
 
@@ -222,10 +256,12 @@ def run_transfer(datasets, methods, dims, seeds):
     results = []
     data_cache = {}
 
+    # load datasets once
     for ds_name in datasets:
         ds = TUDataset(root="data", name=ds_name)
         data_cache[ds_name] = [ds[i] for i in range(len(ds))]
 
+    # iterate
     for seed in seeds:
         for dim in dims:
             for method in methods:
@@ -234,35 +270,43 @@ def run_transfer(datasets, methods, dims, seeds):
                     X_src = get_embeddings(method, graphs_src, dim, seed)
                     y_src = ds_labels(data_cache[src])
 
-                    # Train classifier on source
-                    clf = make_pipeline(StandardScaler(with_mean=True),
-                                        MLPClassifier(hidden_layer_sizes=(128,),
-                                                      activation="relu", solver="adam",
-                                                      max_iter=500, random_state=seed))
-                    clf.fit(X_src, y_src)
-                    y_pred_src = clf.predict(X_src)
-                    y_score_src = clf.predict_proba(X_src) if hasattr(clf, "predict_proba") else None
-                    auc_src = auc_any(y_src, y_score_src, np.unique(y_src))
+                    # train classifier on source embeddings (within-source training)
+                    clf, acc_src, f1_src, auc_src = eval_within(X_src, y_src, seed)
 
                     for tgt in datasets:
                         graphs_tgt = ensure_node_features(data_cache[tgt])
                         X_tgt = get_embeddings(method, graphs_tgt, dim, seed)
                         y_tgt = ds_labels(data_cache[tgt])
 
-                        y_pred_tgt = clf.predict(X_tgt)
-                        y_score_tgt = clf.predict_proba(X_tgt) if hasattr(clf, "predict_proba") else None
+                        acc, f1, auc = eval_transfer(clf, X_tgt, y_tgt)
 
-                        acc = accuracy_score(y_tgt, y_pred_tgt)
-                        f1  = f1_score(y_tgt, y_pred_tgt, average="macro")
-                        auc = auc_any(y_tgt, y_score_tgt, np.unique(y_tgt))
-                        delta_auc = auc_src - auc
+                        res = dict(
+                            src=src,
+                            tgt=tgt,
+                            method=method,
+                            dim=dim,
+                            seed=seed,
 
-                        results.append(dict(
-                            src=src, tgt=tgt, method=method, dim=dim, seed=seed,
-                            acc=acc, f1=f1, auc=auc, auc_src=auc_src, delta_auc=delta_auc
-                        ))
+                            acc=acc,
+                            f1=f1,
+                            auc=auc,
 
-                        print(f"{method} {src}->{tgt} dim={dim} seed={seed} AUC={auc:.3f}")
+                            acc_src=acc_src,
+                            f1_src=f1_src,
+                            auc_src=auc_src,
+
+                            delta_acc=acc_src - acc,
+                            delta_f1=f1_src - f1,
+                            delta_auc=auc_src - auc,
+                        )
+                        results.append(res)
+
+                        print(
+                            f"{method.upper()} {src}->{tgt} dim={dim} seed={seed} | "
+                            f"ACC={acc:.3f} (Δ={res['delta_acc']:+.3f})  "
+                            f"F1={f1:.3f} (Δ={res['delta_f1']:+.3f})  "
+                            f"AUC={auc:.3f} (Δ={res['delta_auc']:+.3f})"
+                        )
 
     df = pd.DataFrame(results)
     out_csv = os.path.join(OUT_DIR_TABLES, "transfer_results.csv")
@@ -272,36 +316,92 @@ def run_transfer(datasets, methods, dims, seeds):
 
 
 # ---------------- Visualization ----------------
+def _pivot(df, metric, method, dim):
+    sub = df[(df["method"] == method) & (df["dim"] == dim)]
+    return sub.pivot_table(values=metric, index="src", columns="tgt", aggfunc="mean")
+
 def plot_heatmaps(df):
+    """
+    Keeps all pairs, including src==tgt.
+    """
+    metrics = ["auc", "acc", "f1"]
     for method in df["method"].unique():
-        sub = df[df["method"] == method]
-        for dim in sorted(sub["dim"].unique()):
-            pivot = sub[sub["dim"] == dim].pivot_table(values="auc", index="src", columns="tgt", aggfunc="mean")
-            plt.figure(figsize=(6,5))
-            sns.heatmap(pivot, annot=True, cmap="YlGnBu", fmt=".2f")
-            plt.title(f"{method.upper()} — Transfer AUC (dim={dim})")
-            plt.tight_layout()
-            plt.savefig(f"{OUT_DIR_FIGS}/{method}_transfer_heatmap_d{dim}.png", dpi=150)
-            plt.close()
+        for dim in sorted(df["dim"].unique()):
+            for metric in metrics:
+                pivot = _pivot(df, metric, method, dim)
+                plt.figure(figsize=(6,5))
+                sns.heatmap(pivot, annot=True, cmap="YlGnBu", fmt=".2f")
+                plt.title(f"{method.upper()} — Transfer {metric.upper()} (dim={dim})")
+                plt.tight_layout()
+                plt.savefig(f"{OUT_DIR_FIGS}/{method}_transfer_heatmap_{metric}_d{dim}.png", dpi=150)
+                plt.close()
 
-def plot_barplots(df):
-    plt.figure(figsize=(8,6))
-    sns.barplot(data=df, x="method", y="auc", hue="tgt")
-    plt.title("Cross-Dataset AUC (All methods)")
-    plt.tight_layout()
-    plt.savefig(f"{OUT_DIR_FIGS}/transfer_barplot_all.png", dpi=150)
-    plt.close()
+def plot_barplots_cross(df):
+    """
+    Barplots for ONLY cross-dataset transfer (src != tgt).
+    Hue is the explicit direction 'src→tgt'.
+    One figure per metric.
+    """
+    df_cross = df[df["src"] != df["tgt"]].copy()
+    df_cross["pair"] = df_cross["src"] + "→" + df_cross["tgt"]
 
-def plot_scatter(df):
-    plt.figure(figsize=(6,6))
-    sns.scatterplot(data=df, x="auc_src", y="auc", hue="method", style="tgt", s=80)
-    plt.plot([0,1],[0,1],'k--',alpha=0.5)
-    plt.xlabel("Within-Dataset AUC")
-    plt.ylabel("Cross-Dataset AUC")
-    plt.title("Transferability vs. Within-Dataset AUC")
-    plt.tight_layout()
-    plt.savefig(f"{OUT_DIR_FIGS}/transfer_scatter.png", dpi=150)
-    plt.close()
+    metrics = ["auc", "acc", "f1"]
+    for metric in metrics:
+        plt.figure(figsize=(10,6))
+        sns.barplot(
+            data=df_cross,
+            x="method",
+            y=metric,
+            hue="pair",
+            estimator=np.mean,
+            errorbar=None
+        )
+        plt.ylabel(metric.upper())
+        plt.xlabel("Embedding method")
+        plt.title(f"Cross-Dataset {metric.upper()} by Transfer Direction (src→tgt, no within)")
+        plt.tight_layout()
+        plt.savefig(f"{OUT_DIR_FIGS}/transfer_barplot_{metric}_cross_only.png", dpi=150)
+        plt.close()
+
+def plot_scatter_cross(df):
+    """
+    Scatter comparing:
+      x = within-dataset metric on SRC (src→src),
+      y = cross-dataset metric on TGT (src→tgt),
+    but ONLY for src != tgt.
+
+    We show separate figures for AUC / ACC / F1.
+    Hue = method, style = transfer pair.
+    """
+    df_cross = df[df["src"] != df["tgt"]].copy()
+    df_cross["pair"] = df_cross["src"] + "→" + df_cross["tgt"]
+
+    # (within metric col, transfer metric col, tag/metric name)
+    metric_pairs = [
+        ("auc_src", "auc", "auc"),
+        ("acc_src", "acc", "acc"),
+        ("f1_src",  "f1",  "f1"),
+    ]
+
+    for xcol, ycol, tag in metric_pairs:
+        plt.figure(figsize=(6,6))
+        sns.scatterplot(
+            data=df_cross,
+            x=xcol,
+            y=ycol,
+            hue="method",
+            style="pair",
+            s=80
+        )
+        # y = x reference line, just to see degradation
+        plt.plot([0,1],[0,1],'k--',alpha=0.5)
+
+        plt.xlabel(f"Within-Source {tag.upper()} (src→src)")
+        plt.ylabel(f"Transfer {tag.upper()} (src→tgt)")
+        plt.title(f"Cross Transfer vs. Within Performance ({tag.upper()})\n(src != tgt only)")
+        plt.tight_layout()
+        plt.savefig(f"{OUT_DIR_FIGS}/transfer_scatter_{tag}_cross_only.png", dpi=150)
+        plt.close()
 
 
 # ---------------- CLI ----------------
@@ -317,9 +417,14 @@ def parse_args():
 def main():
     args = parse_args()
     df = run_transfer(args.datasets, args.methods, args.dims, args.seeds)
+
+    # Heatmaps (includes diagonal)
     plot_heatmaps(df)
-    plot_barplots(df)
-    plot_scatter(df)
+
+    # Your requested views: ONLY true cross, src != tgt
+    plot_barplots_cross(df)
+    plot_scatter_cross(df)
+
     print("\n✅ All plots saved in report/figures/")
     print("✅ Transfer results saved in report/tables/transfer_results.csv")
 

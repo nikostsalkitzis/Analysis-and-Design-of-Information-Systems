@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" font-family="sans-serif" font-size="12">
+<rect x="0" y="0" width="600" height="400" fill="#ffffff"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="344.00" text-anchor="end" fill="#000000">0.34</text>
+<line x1="60" y1="270.00" x2="580" y2="270.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="274.00" text-anchor="end" fill="#000000">0.367</text>
+<line x1="60" y1="200.00" x2="580" y2="200.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="204.00" text-anchor="end" fill="#000000">0.394</text>
+<line x1="60" y1="130.00" x2="580" y2="130.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="134.00" text-anchor="end" fill="#000000">0.422</text>
+<line x1="60" y1="60.00" x2="580" y2="60.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="64.00" text-anchor="end" fill="#000000">0.449</text>
+<line x1="60" y1="60" x2="60" y2="340" stroke="#000000" stroke-width="1.5"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#000000" stroke-width="1.5"/>
+<line x1="60.00" y1="340.00" x2="60.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="60.00" y="360.00" text-anchor="middle" fill="#000000">16</text>
+<line x1="94.67" y1="340.00" x2="94.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="94.67" y="360.00" text-anchor="middle" fill="#000000">32</text>
+<line x1="164.00" y1="340.00" x2="164.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="164.00" y="360.00" text-anchor="middle" fill="#000000">64</text>
+<line x1="302.67" y1="340.00" x2="302.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="302.67" y="360.00" text-anchor="middle" fill="#000000">128</text>
+<line x1="580.00" y1="340.00" x2="580.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="580.00" y="360.00" text-anchor="middle" fill="#000000">256</text>
+<polygon points="60.00,128.59 94.67,134.03 164.00,132.65 302.67,199.09 580.00,72.73 580.00,211.39 302.67,217.45 164.00,210.17 94.67,194.45 60.00,290.85" fill="#d62728" opacity="0.2" stroke="none"/>
+<polyline points="60.00,209.72 94.67,164.24 164.00,171.41 302.67,208.27 580.00,142.06" fill="none" stroke="#d62728" stroke-width="2"/>
+<circle cx="60.00" cy="209.72" r="3" fill="#d62728" stroke="none"/>
+<circle cx="94.67" cy="164.24" r="3" fill="#d62728" stroke="none"/>
+<circle cx="164.00" cy="171.41" r="3" fill="#d62728" stroke="none"/>
+<circle cx="302.67" cy="208.27" r="3" fill="#d62728" stroke="none"/>
+<circle cx="580.00" cy="142.06" r="3" fill="#d62728" stroke="none"/>
+<polygon points="60.00,181.96 94.67,108.55 164.00,216.46 302.67,134.31 580.00,105.50 580.00,171.79 302.67,244.86 164.00,315.27 94.67,327.27 60.00,272.98" fill="#1f77b4" opacity="0.2" stroke="none"/>
+<polyline points="60.00,227.47 94.67,217.91 164.00,265.86 302.67,189.58 580.00,138.64" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.00" cy="227.47" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="94.67" cy="217.91" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="164.00" cy="265.86" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="302.67" cy="189.58" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="580.00" cy="138.64" r="3" fill="#1f77b4" stroke="none"/>
+<rect x="460" y="70" width="12" height="12" fill="#d62728" opacity="0.6" stroke="#d62728" stroke-width="2"/>
+<text x="478" y="80" fill="#000000">MLP</text>
+<rect x="460" y="88" width="12" height="12" fill="#1f77b4" opacity="0.6" stroke="#1f77b4" stroke-width="2"/>
+<text x="478" y="98" fill="#000000">SVM</text>
+<text x="300.00" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000">IMDB-MULTI — F1 vs. Dim (graph2vec) (n_seeds=3)</text>
+<text x="320.00" y="380" text-anchor="middle" fill="#000000">Embedding dimension</text>
+<text x="20" y="200.00" transform="rotate(-90 20,200.00)" text-anchor="middle" fill="#000000">Macro-F1 (mean ± std)</text>
+</svg>
