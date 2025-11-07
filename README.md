@@ -181,5 +181,5 @@ python final_task9.py \
 |---------------|-----------|--------------|------------------|
 | `--datasets` | list | `["MUTAG", "ENZYMES", "IMDB-MULTI"]` | Names of TUDatasets to analyze for counterfactual explanations. |
 | `--combos` | string | `graph2vec+netlsd graph2vec+gin netlsd+gin graph2vec+netlasd+gin` | Names of embeddings that will be combined|
-| `--dims` | `16 32 64 128 256` | The **embedding dimensions** (vector lengths) to evaluate. You can include multiple values to compare performance. |
+| `--dims` | list of int| `16 32 64 128 256` | The **embedding dimensions** (vector lengths) to evaluate. You can include multiple values to compare performance. |
 | `--seed` | int | `0` | Random seed for reproducibility of model training and saliency computation. |
