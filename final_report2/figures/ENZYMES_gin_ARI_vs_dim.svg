@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" font-family="sans-serif" font-size="12">
+<rect x="0" y="0" width="600" height="400" fill="#ffffff"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="344.00" text-anchor="end" fill="#000000">-0.00269</text>
+<line x1="60" y1="270.00" x2="580" y2="270.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="274.00" text-anchor="end" fill="#000000">0.00655</text>
+<line x1="60" y1="200.00" x2="580" y2="200.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="204.00" text-anchor="end" fill="#000000">0.0158</text>
+<line x1="60" y1="130.00" x2="580" y2="130.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="134.00" text-anchor="end" fill="#000000">0.025</text>
+<line x1="60" y1="60.00" x2="580" y2="60.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="64.00" text-anchor="end" fill="#000000">0.0343</text>
+<line x1="60" y1="60" x2="60" y2="340" stroke="#000000" stroke-width="1.5"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#000000" stroke-width="1.5"/>
+<line x1="60.00" y1="340.00" x2="60.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="60.00" y="360.00" text-anchor="middle" fill="#000000">16</text>
+<line x1="94.67" y1="340.00" x2="94.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="94.67" y="360.00" text-anchor="middle" fill="#000000">32</text>
+<line x1="164.00" y1="340.00" x2="164.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="164.00" y="360.00" text-anchor="middle" fill="#000000">64</text>
+<line x1="302.67" y1="340.00" x2="302.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="302.67" y="360.00" text-anchor="middle" fill="#000000">128</text>
+<line x1="580.00" y1="340.00" x2="580.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="580.00" y="360.00" text-anchor="middle" fill="#000000">256</text>
+<polygon points="60.00,72.73 94.67,255.14 164.00,271.07 302.67,264.84 580.00,83.48 580.00,149.79 302.67,303.89 164.00,295.25 94.67,327.27 60.00,241.97" fill="#1f77b4" opacity="0.2" stroke="none"/>
+<polyline points="60.00,157.35 94.67,291.21 164.00,283.16 302.67,284.37 580.00,116.63" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.00" cy="157.35" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="94.67" cy="291.21" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="164.00" cy="283.16" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="302.67" cy="284.37" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="580.00" cy="116.63" r="3" fill="#1f77b4" stroke="none"/>
+<polygon points="60.00,319.45 94.67,319.56 164.00,319.47 302.67,319.42 580.00,319.62 580.00,319.70 302.67,319.65 164.00,319.47 94.67,319.63 60.00,319.67" fill="#d62728" opacity="0.2" stroke="none"/>
+<polyline points="60.00,319.56 94.67,319.59 164.00,319.47 302.67,319.53 580.00,319.66" fill="none" stroke="#d62728" stroke-width="2"/>
+<circle cx="60.00" cy="319.56" r="3" fill="#d62728" stroke="none"/>
+<circle cx="94.67" cy="319.59" r="3" fill="#d62728" stroke="none"/>
+<circle cx="164.00" cy="319.47" r="3" fill="#d62728" stroke="none"/>
+<circle cx="302.67" cy="319.53" r="3" fill="#d62728" stroke="none"/>
+<circle cx="580.00" cy="319.66" r="3" fill="#d62728" stroke="none"/>
+<rect x="460" y="70" width="12" height="12" fill="#1f77b4" opacity="0.6" stroke="#1f77b4" stroke-width="2"/>
+<text x="478" y="80" fill="#000000">KMeans</text>
+<rect x="460" y="88" width="12" height="12" fill="#d62728" opacity="0.6" stroke="#d62728" stroke-width="2"/>
+<text x="478" y="98" fill="#000000">Spectral</text>
+<text x="300.00" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000">ENZYMES — ARI vs. Dim (gin) (n_runs=3)</text>
+<text x="320.00" y="380" text-anchor="middle" fill="#000000">Embedding dimension</text>
+<text x="20" y="200.00" transform="rotate(-90 20,200.00)" text-anchor="middle" fill="#000000">ARI (mean ± std)</text>
+</svg>
