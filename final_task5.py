@@ -734,17 +734,45 @@ def normalize_saliency(sal, mode="minmax"):
 # ============================================================================
 
 def run_saliency(datasets, methods, sample_k=6, seed=0,
-                 # GIN
+                 # GIN parameters
                  gin_hidden=32, gin_epochs=15, gin_mode="grad",
-                 # Graph2Vec
+                 # Graph2Vec parameters
                  g2v_dim=32, g2v_wl=2, g2v_epochs=8, g2v_metric="cosine",
-                 # NetLSD
+                 # NetLSD parameters
                  netlsd_metric="cosine",
-                 # Visualization / aggregation
+                 # Visualization parameters
                  topk_frac=0.0, norm_mode="minmax"):
     """
-    norm_mode: 'minmax' (default), 'mean', or 'none' — used for cross-method comparability.
-    g2v_metric/netlsd_metric: 'cosine' (default), 'relative_l2', or 'l2'
+    Run complete saliency analysis across datasets and methods.
+    
+    WORKFLOW:
+    For each dataset:
+        1. Load dataset
+        2. Train GIN model (if needed)
+        3. Sample k graphs
+        
+        For each sampled graph:
+            For each method:
+                a. Compute raw saliency per node
+                b. Normalize saliency
+                c. Plot colored graph
+                d. Save statistics
+        
+    4. Aggregate results
+    5. Generate heatmap comparing methods
+    
+    PARAMETERS:
+    - norm_mode: How to normalize saliency ('minmax' recommended)
+    - g2v_metric/netlsd_metric: Distance metric for pseudo-saliency
+    - topk_frac: Fraction of nodes to outline (e.g., 0.1 = top 10%)
+    - gin_mode: 'grad' (gradient) or 'gradxinput' (gradient × input)
+    
+    Args:
+        datasets: List of dataset names
+        methods: List of methods (subset of ["GIN", "Graph2Vec", "NetLSD"])
+        sample_k: Number of graphs per dataset to analyze
+        seed: Random seed
+        (see parameters above for others)
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_seed(seed)
@@ -753,17 +781,37 @@ def run_saliency(datasets, methods, sample_k=6, seed=0,
 
     for ds_name in datasets:
         print(f"\n=== Dataset: {ds_name} ===")
+        
+        # Load dataset
         ds = TUDataset(root="data", name=ds_name)
         graphs = ensure_node_features([ds[i] for i in range(len(ds))])
         y_all = np.array([int(g.y) for g in graphs])
         num_classes = int(y_all.max()) + 1
 
-        # Train GIN lightly once per dataset
+        # ===== TRAIN GIN MODEL (if needed) =====
         gin_model = None
         if "GIN" in methods:
-            gin_model = GINSmall(graphs[0].x.size(1), hidden=gin_hidden, layers=3, n_classes=num_classes).to(device)
-            opt = torch.optim.Adam(gin_model.parameters(), lr=1e-3, weight_decay=1e-4)
+            print(f"Training GIN model for {ds_name}...")
+            
+            # Initialize model
+            gin_model = GINSmall(
+                graphs[0].x.size(1),
+                hidden=gin_hidden,
+                layers=3,
+                n_classes=num_classes
+            ).to(device)
+            
+            # Optimizer
+            opt = torch.optim.Adam(
+                gin_model.parameters(),
+                lr=1e-3,
+                weight_decay=1e-4
+            )
+            
+            # Data loader
             loader = DataLoader(graphs, batch_size=64, shuffle=True)
+            
+            # Training loop
             gin_model.train()
             for _ in range(gin_epochs):
                 for batch in loader:
@@ -773,53 +821,93 @@ def run_saliency(datasets, methods, sample_k=6, seed=0,
                     loss = F.cross_entropy(logits, batch.y)
                     loss.backward()
                     opt.step()
+            
             gin_model.eval()
+            print(f"GIN training complete.")
 
-        # sample graphs
+        # ===== SAMPLE GRAPHS =====
         k = min(sample_k, len(graphs))
         sample_ids = np.random.choice(len(graphs), k, replace=False)
 
+        # ===== PROCESS EACH SAMPLED GRAPH =====
         for i in sample_ids:
             g = graphs[i]
             label = int(g.y)
-            print(f"  -> graph {i} (class {label})")
+            print(f"  -> graph {i} (class {label}, {g.num_nodes} nodes)")
 
-            # Train Graph2Vec model for THIS base graph (fast)
+            # Train Graph2Vec model for THIS specific graph (if needed)
             if "Graph2Vec" in methods:
-                g2v_model = graph2vec_train_one(g, dim=g2v_dim, wl_iterations=g2v_wl,
-                                                epochs=g2v_epochs, seed=seed)
+                g2v_model = graph2vec_train_one(
+                    g,
+                    dim=g2v_dim,
+                    wl_iterations=g2v_wl,
+                    epochs=g2v_epochs,
+                    seed=seed
+                )
 
+            # ===== COMPUTE SALIENCY PER METHOD =====
             for method in methods:
                 print(f"     method: {method}")
                 try:
+                    # Compute raw saliency (method-specific)
                     if method == "GIN":
-                        sal_raw = gin_saliency(gin_model, g, device, mode=gin_mode)
+                        sal_raw = gin_saliency(
+                            gin_model, g, device, mode=gin_mode
+                        )
+                    
                     elif method == "Graph2Vec":
-                        sal_raw = graph2vec_saliency_fast(g, g2v_model, wl_iterations=g2v_wl, metric=g2v_metric)
+                        sal_raw = graph2vec_saliency_fast(
+                            g, g2v_model,
+                            wl_iterations=g2v_wl,
+                            metric=g2v_metric
+                        )
+                    
                     elif method == "NetLSD":
                         sal_raw = netlsd_saliency(g, metric=netlsd_metric)
-                        if len(sal_raw) != g.num_nodes:  # guard
-                            sal_raw = np.pad(sal_raw, (0, max(0, g.num_nodes - len(sal_raw))), constant_values=0.0)[:g.num_nodes]
+                        
+                        # Guard against size mismatch
+                        if len(sal_raw) != g.num_nodes:
+                            sal_raw = np.pad(
+                                sal_raw,
+                                (0, max(0, g.num_nodes - len(sal_raw))),
+                                constant_values=0.0
+                            )[:g.num_nodes]
+                    
                     else:
                         continue
 
-                    # Normalize for visualization & cross-method aggregation
+                    # ===== NORMALIZE SALIENCY =====
+                    # Normalize to [0,1] for visualization and comparison
                     sal_norm = normalize_saliency(sal_raw, mode=norm_mode)
 
-                    # Plots
-                    plot_graph_saliency(g, sal_norm, ds_name, method, i, topk_frac=topk_frac, add_colorbar=True)
-                    plot_mean_saliency_bar(float(np.mean(sal_norm)), ds_name, method, i)
+                    # ===== GENERATE VISUALIZATIONS =====
+                    # Plot colored graph
+                    plot_graph_saliency(
+                        g, sal_norm,
+                        ds_name, method, i,
+                        topk_frac=topk_frac,
+                        add_colorbar=True
+                    )
+                    
+                    # Plot mean saliency bar
+                    plot_mean_saliency_bar(
+                        float(np.mean(sal_norm)),
+                        ds_name, method, i
+                    )
 
+                    # ===== SAVE STATISTICS =====
+                    # Store both raw and normalized summaries
                     summary_rows.append({
                         "dataset": ds_name,
                         "method": method,
                         "graph_id": int(i),
                         "label": int(label),
                         "num_nodes": int(g.num_nodes),
-                        # store BOTH raw and normalized summaries
+                        # Raw statistics (before normalization)
                         "mean_saliency_raw": float(np.mean(sal_raw)),
                         "max_saliency_raw": float(np.max(sal_raw)),
                         "std_saliency_raw": float(np.std(sal_raw)),
+                        # Normalized statistics (after normalization)
                         "mean_saliency_norm": float(np.mean(sal_norm)),
                         "max_saliency_norm": float(np.max(sal_norm)),
                         "std_saliency_norm": float(np.std(sal_norm)),
@@ -827,7 +915,7 @@ def run_saliency(datasets, methods, sample_k=6, seed=0,
 
                 except Exception as e:
                     print(f"     [warn] saliency failed ({method}, graph {i}): {e}")
-                    # still record a row to keep table consistent
+                    # Record failure to keep table consistent
                     summary_rows.append({
                         "dataset": ds_name,
                         "method": method,
@@ -842,76 +930,446 @@ def run_saliency(datasets, methods, sample_k=6, seed=0,
                         "std_saliency_norm": float("nan"),
                     })
 
-    # Save summary CSV
+    # ===== SAVE SUMMARY CSV =====
     import pandas as pd
     df = pd.DataFrame(summary_rows)
     out_csv = os.path.join(OUT_DIR_TAB, "saliency_summary.csv")
     df.to_csv(out_csv, index=False)
     print(f"\n✅ Saved saliency summary to: {out_csv}")
 
-    # Heatmap: dataset × method → mean of normalized mean-saliency (comparable)
+    # ===== GENERATE COMPARISON HEATMAP =====
+    # Compare average normalized saliency across datasets and methods
     try:
-        pivot = df.pivot_table(values="mean_saliency_norm", index="dataset", columns="method", aggfunc="mean")
+        # Pivot table: dataset × method → mean of normalized mean-saliency
+        pivot = df.pivot_table(
+            values="mean_saliency_norm",
+            index="dataset",
+            columns="method",
+            aggfunc="mean"
+        )
+        
         import seaborn as sns
         fig, ax = plt.subplots(figsize=(7, 4.2))
-        sns.heatmap(pivot, annot=True, cmap="YlGnBu", fmt=".3f", vmin=0.0, vmax=1.0, ax=ax)
+        
+        # Heatmap with annotations
+        sns.heatmap(
+            pivot,
+            annot=True,
+            cmap="YlGnBu",
+            fmt=".3f",
+            vmin=0.0,
+            vmax=1.0,
+            ax=ax
+        )
+        
         ax.set_title("Average Mean-Node Saliency (normalized, dataset × method)")
         fig.tight_layout()
+        
         heat_path = os.path.join(OUT_DIR_FIG, "saliency_mean_heatmap.png")
         fig.savefig(heat_path, dpi=180)
         plt.close(fig)
         print(f"✅ Saved heatmap to: {heat_path}")
+    
     except Exception as e:
         print(f"[warn] heatmap failed: {e}")
 
-# ---------------- CLI ----------------
+# ============================================================================
+# COMMAND-LINE INTERFACE
+# ============================================================================
+
 def parse_args():
-    p = argparse.ArgumentParser(description="Task (N): Graph saliency for GIN, Graph2Vec, NetLSD across datasets (normalized).")
-    p.add_argument("--datasets", nargs="+", default=["MUTAG", "ENZYMES", "IMDB-MULTI"])
-    p.add_argument("--methods",  nargs="+", default=["GIN", "Graph2Vec", "NetLSD"])
-    p.add_argument("--sample_k", type=int, default=6, help="Graphs per dataset to visualize.")
-    p.add_argument("--seed", type=int, default=0)
+    """Parse command-line arguments."""
+    p = argparse.ArgumentParser(
+        description="Task 5: Graph saliency for GIN, Graph2Vec, NetLSD "
+                    "across datasets (normalized for comparison)."
+    )
+    
+    # Dataset and method selection
+    p.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["MUTAG", "ENZYMES", "IMDB-MULTI"],
+        help="Datasets to analyze"
+    )
+    p.add_argument(
+        "--methods",
+        nargs="+",
+        default=["GIN", "Graph2Vec", "NetLSD"],
+        help="Methods to compute saliency for"
+    )
+    p.add_argument(
+        "--sample_k",
+        type=int,
+        default=6,
+        help="Number of graphs per dataset to visualize"
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Random seed for reproducibility"
+    )
 
-    # GIN params
-    p.add_argument("--gin_hidden", type=int, default=32)
-    p.add_argument("--gin_epochs", type=int, default=15)
-    p.add_argument("--gin_mode", choices=["grad","gradxinput"], default="grad")
+    # GIN-specific parameters
+    p.add_argument(
+        "--gin_hidden",
+        type=int,
+        default=32,
+        help="Hidden dimension for GIN encoder"
+    )
+    p.add_argument(
+        "--gin_epochs",
+        type=int,
+        default=15,
+        help="Training epochs for GIN"
+    )
+    p.add_argument(
+        "--gin_mode",
+        choices=["grad", "gradxinput"],
+        default="grad",
+        help="Saliency mode: 'grad' (gradient) or 'gradxinput' (gradient×input)"
+    )
 
-    # Graph2Vec params
-    p.add_argument("--g2v_dim", type=int, default=32)
-    p.add_argument("--g2v_wl", type=int, default=2)
-    p.add_argument("--g2v_epochs", type=int, default=8)
-    p.add_argument("--g2v_metric", choices=["cosine","relative_l2","l2"], default="cosine")
+    # Graph2Vec-specific parameters
+    p.add_argument(
+        "--g2v_dim",
+        type=int,
+        default=32,
+        help="Embedding dimension for Graph2Vec"
+    )
+    p.add_argument(
+        "--g2v_wl",
+        type=int,
+        default=2,
+        help="WL iterations for Graph2Vec"
+    )
+    p.add_argument(
+        "--g2v_epochs",
+        type=int,
+        default=8,
+        help="Training epochs for Graph2Vec"
+    )
+    p.add_argument(
+        "--g2v_metric",
+        choices=["cosine", "relative_l2", "l2"],
+        default="cosine",
+        help="Distance metric for Graph2Vec saliency"
+    )
 
-    # NetLSD params
-    p.add_argument("--netlsd_metric", choices=["cosine","relative_l2","l2"], default="cosine")
+    # NetLSD-specific parameters
+    p.add_argument(
+        "--netlsd_metric",
+        choices=["cosine", "relative_l2", "l2"],
+        default="cosine",
+        help="Distance metric for NetLSD saliency"
+    )
 
-    # Visualization / aggregation
-    p.add_argument("--topk_frac", type=float, default=0.0, help="Outline top-k fraction of salient nodes (e.g., 0.1).")
-    p.add_argument("--norm_mode", choices=["minmax","mean","none"], default="minmax",
-                   help="Per-graph normalization used before aggregation/plots.")
+    # Visualization and aggregation parameters
+    p.add_argument(
+        "--topk_frac",
+        type=float,
+        default=0.0,
+        help="Outline top-k fraction of salient nodes (e.g., 0.1 for top 10%%)"
+    )
+    p.add_argument(
+        "--norm_mode",
+        choices=["minmax", "mean", "none"],
+        default="minmax",
+        help="Per-graph normalization mode for cross-method comparison"
+    )
+    
     return p.parse_args()
 
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+
 def main():
+    """
+    Main execution function.
+    
+    Workflow:
+    1. Parse command-line arguments
+    2. Run saliency analysis
+    3. Generate visualizations
+    4. Save summary statistics
+    """
     args = parse_args()
+    
+    print("="*70)
+    print("GRAPH EMBEDDING EXPLAINABILITY & SALIENCY ANALYSIS")
+    print("="*70)
+    print(f"Datasets: {args.datasets}")
+    print(f"Methods: {args.methods}")
+    print(f"Graphs per dataset: {args.sample_k}")
+    print(f"Normalization: {args.norm_mode}")
+    print("="*70)
+    
+    # Run saliency analysis
     run_saliency(
         datasets=args.datasets,
         methods=args.methods,
         sample_k=args.sample_k,
         seed=args.seed,
+        # GIN parameters
         gin_hidden=args.gin_hidden,
         gin_epochs=args.gin_epochs,
         gin_mode=args.gin_mode,
+        # Graph2Vec parameters
         g2v_dim=args.g2v_dim,
         g2v_wl=args.g2v_wl,
         g2v_epochs=args.g2v_epochs,
         g2v_metric=args.g2v_metric,
+        # NetLSD parameters
         netlsd_metric=args.netlsd_metric,
+        # Visualization parameters
         topk_frac=args.topk_frac,
         norm_mode=args.norm_mode,
     )
-    print("\nAll saliency figures saved under:", OUT_DIR_FIG)
+    
+    print("\n" + "="*70)
+    print("SALIENCY ANALYSIS COMPLETE!")
+    print("="*70)
+    print(f"\nOutputs:")
+    print(f"  - Colored graphs: {OUT_DIR_FIG}/")
+    print(f"  - Summary table: {OUT_DIR_TAB}/saliency_summary.csv")
+    print(f"  - Comparison heatmap: {OUT_DIR_FIG}/saliency_mean_heatmap.png")
+    print(f"\nVisualization files:")
+    print(f"  - {{dataset}}_{{method}}_graph{{id}}.png : Colored by saliency")
+    print(f"  - {{dataset}}_{{method}}_graph{{id}}_bar.png : Mean saliency bar")
+    print("\n✅ All saliency figures saved!")
 
 if __name__ == "__main__":
     main()
 
+
+# ============================================================================
+# USAGE EXAMPLES & INTERPRETATION GUIDE
+# ============================================================================
+
+"""
+BASIC USAGE:
+-----------
+# Quick test with defaults
+python final_task5.py
+
+# Custom configuration
+python final_task5.py \
+  --datasets MUTAG ENZYMES \
+  --methods GIN Graph2Vec \
+  --sample_k 10
+
+# Outline top 20% most salient nodes in red
+python final_task5.py \
+  --topk_frac 0.2
+
+
+COMPLETE EVALUATION:
+-------------------
+python final_task5.py \
+  --datasets MUTAG ENZYMES IMDB-MULTI \
+  --methods GIN Graph2Vec NetLSD \
+  --sample_k 12 \
+  --gin_epochs 30 \
+  --topk_frac 0.15 \
+  --norm_mode minmax
+
+
+METHOD-SPECIFIC TUNING:
+----------------------
+
+GIN:
+  --gin_hidden 64        # Larger hidden dimension
+  --gin_epochs 30        # More training
+  --gin_mode gradxinput  # Gradient × Input (like Grad-CAM)
+
+Graph2Vec:
+  --g2v_dim 64           # Larger embedding
+  --g2v_wl 3             # Deeper WL kernel
+  --g2v_metric relative_l2  # Different distance metric
+
+NetLSD:
+  --netlsd_metric l2     # Absolute distance instead of cosine
+
+
+INTERPRETING VISUALIZATIONS:
+---------------------------
+
+Graph Coloring:
+  - Blue nodes: Low saliency (less important)
+  - Green nodes: Medium saliency
+  - Yellow nodes: High saliency (most important)
+  
+Red Outlines (if --topk_frac > 0):
+  - Highlight the most salient nodes
+  - Example: --topk_frac 0.1 outlines top 10%
+
+Bar Charts:
+  - Show average saliency per graph
+  - Higher bar = Graph has more important nodes overall
+
+
+INTERPRETING SALIENCY PATTERNS:
+-------------------------------
+
+HIGH SALIENCY NODES (Yellow):
+  - Central hubs in social networks
+  - Functional groups in molecules
+  - Key residues in proteins
+  - Bottleneck nodes in infrastructure
+
+LOW SALIENCY NODES (Blue):
+  - Peripheral nodes
+  - Redundant connections
+  - Background structure
+
+UNIFORM SALIENCY (All similar colors):
+  - Homogeneous graph structure
+  - All nodes equally important
+  - Or: Method doesn't discriminate well
+
+
+NORMALIZATION IMPORTANCE:
+------------------------
+
+WHY normalize?
+  - GIN gradients: Range [0, 100]
+  - Graph2Vec distances: Range [0, 2]
+  - NetLSD distances: Range [0, 0.5]
+  → Cannot compare directly!
+
+After normalization [0, 1]:
+  - All methods on same scale
+  - Can aggregate across methods
+  - Can compare saliency distributions
+
+Modes:
+  - "minmax": Best for visualization (full color range)
+  - "mean": Best for statistics (preserves ratios)
+  - "none": Best for debugging (raw values)
+
+
+TROUBLESHOOTING:
+---------------
+
+1. All nodes same color:
+   → Try different normalization mode
+   → Method might not discriminate for this graph
+   → Increase sample size
+
+2. GIN saliency is very noisy:
+   → Train longer (--gin_epochs 50)
+   → Use gradxinput mode instead of grad
+   → Increase hidden dimension
+
+3. Graph2Vec fails on some graphs:
+   → Graphs too small (< 5 nodes)
+   → Increase --g2v_epochs
+   → Check min_count parameter
+
+4. NetLSD very slow:
+   → Expected for large graphs (eigendecomposition)
+   → Sample fewer graphs
+   → Skip NetLSD for large datasets
+
+
+PERFORMANCE TIPS:
+----------------
+
+Fast mode (for testing):
+  --sample_k 3
+  --gin_epochs 10
+  --g2v_epochs 5
+
+Quality mode (for publication):
+  --sample_k 12
+  --gin_epochs 30
+  --g2v_epochs 20
+  --topk_frac 0.1
+
+GPU acceleration (GIN only):
+  - Automatically uses CUDA if available
+  - 5-10x speedup for GIN training
+
+
+RESEARCH APPLICATIONS:
+---------------------
+
+Drug Discovery:
+  "Which atoms are critical for drug activity?"
+  → High-saliency atoms = pharmacophore
+
+Social Networks:
+  "Who are the key influencers?"
+  → High-saliency nodes = important users
+
+Protein Analysis:
+  "Which residues define protein function?"
+  → High-saliency residues = active site
+
+Infrastructure:
+  "Which roads are critical for traffic flow?"
+  → High-saliency nodes = bottlenecks
+
+
+KEY OUTPUTS:
+-----------
+
+1. Colored Graph Visualizations:
+   - Visual inspection of node importance
+   - Identify important substructures
+   
+2. Summary CSV:
+   - Quantitative saliency statistics
+   - Compare across graphs and methods
+   
+3. Comparison Heatmap:
+   - Overall method behavior
+   - Dataset-specific patterns
+
+4. Bar Charts:
+   - Quick summary per graph
+   - Spot anomalies
+
+
+SCIENTIFIC VALIDATION:
+---------------------
+
+To validate saliency is meaningful:
+
+1. Perturbation Test:
+   Remove high-saliency nodes → Embedding should change more
+   
+2. Correlation Analysis:
+   Saliency vs graph properties (degree, betweenness)
+   
+3. Classification Impact:
+   Mask high-saliency nodes → Accuracy should drop
+   
+4. Domain Expert Validation:
+   "Do highlighted structures make sense?"
+   
+5. Consistency Check:
+   Similar graphs should have similar saliency patterns
+
+
+LIMITATIONS:
+-----------
+
+1. Saliency ≠ Causality
+   - High saliency = correlation, not causation
+   - Node important for embedding ≠ important for task
+   
+2. Method-Specific Biases
+   - GIN: Focuses on features used by neural network
+   - Graph2Vec: Focuses on frequent substructures
+   - NetLSD: Focuses on structural centrality
+   
+3. Visualization Challenges
+   - Large graphs hard to visualize
+   - Overlapping nodes obscure colors
+   - Need domain knowledge to interpret
+
+
+
+"""
