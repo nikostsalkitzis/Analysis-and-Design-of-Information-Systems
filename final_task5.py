@@ -2,34 +2,66 @@
 # -*- coding: utf-8 -*-
 
 """
-Task (N): Graph Embedding Explainability & Attention (All datasets & embeddings)
-— Normalized & comparable across methods —
+Task 5 (Extra): Graph Embedding Explainability & Attention
 
-Embeddings:
-  - GIN: true gradient saliency wrt node features (Grad-CAM-like)
-  - Graph2Vec: fast pseudo-saliency via WL document + Doc2Vec infer_vector (no retraining)
-  - NetLSD: pseudo-saliency via node-deletion signature change
+PURPOSE:
+- Understand WHICH NODES are most important for graph embeddings
+- Provide interpretability for black-box embedding methods
+- Compare saliency patterns across different methods
+- Visualize node importance with colored graphs
 
-Datasets:
-  - MUTAG, ENZYMES, IMDB-MULTI (configurable via CLI)
+KEY QUESTION:
+"Which nodes in a graph contribute most to its embedding?"
 
-Outputs:
-  - report/figures/saliency/<DATASET>_<METHOD>_graph<ID>.png
-  - report/figures/saliency/<DATASET>_<METHOD>_graph<ID>_bar.png
-  - report/tables/saliency_summary.csv  (raw + normalized saliency per graph)
-  - report/figures/saliency/saliency_mean_heatmap.png (mean normalized saliency per dataset × method)
+WHY THIS MATTERS:
+- Explainability: Understand what the embedding "sees"
+- Trust: Validate that embeddings focus on meaningful structures
+- Debugging: Identify if method captures relevant patterns
+- Domain insight: Discover important substructures
+
+METHODS:
+1. GIN (Supervised): TRUE gradient-based saliency (Grad-CAM-like)
+   - Compute ∂||embedding||/∂x (gradient of embedding norm w.r.t. node features)
+   - Analogous to neural network visualization techniques
+   
+2. Graph2Vec (Unsupervised): PSEUDO-saliency via node deletion
+   - Remove each node, recompute embedding, measure change
+   - Larger change → More important node
+   
+3. NetLSD (Spectral): PSEUDO-saliency via spectral signature change
+   - Remove each node, recompute heat trace, measure distance
+   - Nodes affecting global structure → High saliency
+
+WORKFLOW:
+1. Load dataset and sample graphs
+2. For each graph:
+   a. Compute base embedding
+   b. For each node:
+      - Compute node saliency (method-specific)
+   c. Normalize saliency [0,1] for visualization
+   d. Plot graph colored by node importance
+3. Aggregate statistics across graphs
+4. Generate heatmap comparing methods
+
+NORMALIZATION:
+- Raw saliency values vary by method (different scales)
+- Normalize to [0,1] within each graph for fair comparison
+- Allows cross-method aggregation and visualization
 """
 
-# ---------------- Headless plotting ----------------
+# ============================================================================
+# ENVIRONMENT SETUP
+# ============================================================================
+
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # Headless plotting (no display needed)
 
 import os, random, warnings, argparse
 warnings.filterwarnings("ignore")
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+import matplotlib.cm as cm  # Color maps for visualization
 import networkx as nx
 
 import torch
@@ -44,121 +76,306 @@ from torch_geometric.utils import to_networkx
 from karateclub import Graph2Vec
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ---- Patch SciPy errstate -> numpy.errstate (for NetLSD safety) ----
+# ============================================================================
+# COMPATIBILITY PATCH
+# ============================================================================
+
+# Patch SciPy errstate for NetLSD safety
 import numpy as _np
 import scipy as _sp
 if not hasattr(_sp, "errstate"):
     _sp.errstate = _np.errstate
-# -------------------------------------------------------------------
+
+# ============================================================================
+# OUTPUT DIRECTORIES
+# ============================================================================
 
 OUT_DIR_FIG = "report/figures/saliency"
 OUT_DIR_TAB = "report/tables"
 os.makedirs(OUT_DIR_FIG, exist_ok=True)
 os.makedirs(OUT_DIR_TAB, exist_ok=True)
 
-# ---------------- Utilities ----------------
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
 def set_seed(seed=0):
+    """Set all random seeds for reproducibility."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
 def ensure_node_features(graphs):
-    """If graph.x is missing, use degree as a 1D feature."""
+    """
+    Ensure all graphs have node features.
+    
+    If a graph lacks node attributes, use degree as a simple 1D feature.
+    This is essential for GIN which requires node features.
+    
+    Args:
+        graphs: List of PyG Data objects
+        
+    Returns:
+        graphs: Same list with x attribute added if missing
+    """
     out = []
     for g in graphs:
         if getattr(g, "x", None) is None:
-            deg = torch.bincount(g.edge_index[0], minlength=g.num_nodes).float().view(-1, 1)
+            # Compute node degree as feature
+            deg = torch.bincount(
+                g.edge_index[0],
+                minlength=g.num_nodes
+            ).float().view(-1, 1)
             g.x = deg
         out.append(g)
     return out
 
 def nx_with_degree_labels(G: nx.Graph) -> nx.Graph:
-    """Stamp categorical 'label' = degree on nodes (Graph2Vec requires node labels)."""
+    """
+    Add discrete 'label' attribute to nodes (required by Graph2Vec).
+    
+    Graph2Vec expects nodes to have categorical labels.
+    We use node degree as the label (standard practice).
+    
+    Args:
+        G: NetworkX graph
+        
+    Returns:
+        G: Same graph with 'label' attribute on each node
+    """
     degs = dict(G.degree())
     for n in G.nodes:
         G.nodes[n]['label'] = int(degs[n])
     return G
 
 def reindex_contiguously(G: nx.Graph) -> nx.Graph:
-    """Relabel nodes to 0..n-1 (KarateClub Graph2Vec expects contiguous ids)."""
+    """
+    Relabel nodes to 0, 1, 2, ..., n-1.
+    
+    KarateClub's Graph2Vec expects contiguous integer node IDs.
+    NetworkX graphs might have arbitrary node IDs after manipulations.
+    
+    Args:
+        G: NetworkX graph
+        
+    Returns:
+        G: Graph with nodes relabeled 0..n-1
+    """
     return nx.convert_node_labels_to_integers(G, ordering='default')
 
 def pyg_to_nx_labeled(graph) -> nx.Graph:
-    """PyG Data -> undirected NetworkX with degree 'label' + contiguous ids."""
+    """
+    Convert PyG graph to NetworkX with proper labeling.
+    
+    Pipeline:
+    1. Convert to NetworkX (undirected)
+    2. Add degree labels to nodes
+    3. Reindex nodes contiguously
+    
+    Args:
+        graph: PyG Data object
+        
+    Returns:
+        G: NetworkX graph ready for Graph2Vec/NetLSD
+    """
     G = to_networkx(graph, to_undirected=True)
     G = nx_with_degree_labels(G)
     G = reindex_contiguously(G)
     return G
 
-# ---------------- WL document generator (minimal) ----------------
+# ============================================================================
+# WEISFEILER-LEHMAN DOCUMENT GENERATOR
+# ============================================================================
+
 def wl_document(G: nx.Graph, wl_iterations: int = 2):
-    """Build a Graph2Vec-like 'document' (list of subtree labels) via WL relabeling."""
+    """
+    Generate a "document" of substructure labels using WL kernel.
+    
+    Weisfeiler-Lehman (WL) algorithm:
+    1. Start with initial node labels
+    2. For each iteration:
+       a. Aggregate neighbor labels
+       b. Create new label: old_label + sorted(neighbor_labels)
+       c. Add to document
+    
+    This creates a bag-of-words representation where "words" are
+    substructure patterns (node + neighborhood context).
+    
+    Graph2Vec uses this document as input to doc2vec.
+    
+    Args:
+        G: NetworkX graph with 'label' attribute on nodes
+        wl_iterations: Number of WL refinement iterations
+        
+    Returns:
+        doc_words: List of substructure label strings
+    """
+    # Initialize labels from node attributes
     labels = {n: str(G.nodes[n].get('label', G.degree[n])) for n in G.nodes}
     doc_words = []
+    
+    # WL refinement iterations
     for it in range(wl_iterations):
         new_labels = {}
         for n in G.nodes:
+            # Get labels of all neighbors
             neigh = sorted(labels[nb] for nb in G.neighbors(n))
+            
+            # Create new label: current_label | neighbor_labels
             new_label = labels[n] + "|" + "|".join(neigh)
             new_labels[n] = new_label
+            
+            # Add to document with iteration prefix
             doc_words.append(f"it{it}:{new_label}")
+        
         labels = new_labels
+    
     return doc_words
 
-# ---------------- Plotting ----------------
-def plot_graph_saliency(graph, saliency, dataset, method, idx, topk_frac=0.0, add_colorbar=True):
-    """Plot a single graph colored by node saliency (expects normalized [0,1] for viz)."""
+# ============================================================================
+# VISUALIZATION FUNCTIONS
+# ============================================================================
+
+def plot_graph_saliency(graph, saliency, dataset, method, idx, 
+                        topk_frac=0.0, add_colorbar=True):
+    """
+    Plot a single graph with nodes colored by saliency.
+    
+    Visualization details:
+    - Node color: Viridis colormap (blue=low, yellow=high)
+    - Node size: Fixed (80)
+    - Edges: Gray
+    - Optional: Red outline for top-k most salient nodes
+    - Colorbar: Shows saliency scale [0,1]
+    
+    Args:
+        graph: PyG Data object
+        saliency: Node saliency values [num_nodes]
+        dataset: Dataset name (for title)
+        method: Method name (for title)
+        idx: Graph index (for title and filename)
+        topk_frac: Fraction of nodes to outline in red (0.0 = none)
+        add_colorbar: Whether to add colorbar
+    """
+    # Convert to NetworkX for visualization
     G = to_networkx(graph, to_undirected=True)
+    
+    # Spring layout for node positions
     pos = nx.spring_layout(G, seed=0)
 
+    # Normalize saliency to [0,1] for colormap
     s = np.asarray(saliency, dtype=float)
-    s = (s - s.min()) / (s.ptp() + 1e-9)
+    s = (s - s.min()) / (s.ptp() + 1e-9)  # ptp = peak-to-peak (max-min)
+    
+    # Map saliency to colors using Viridis colormap
     colors = cm.viridis(s)
 
+    # Create figure
     fig, ax = plt.subplots(figsize=(5, 5))
-    nx.draw_networkx(G, pos=pos, node_color=colors, node_size=80, edge_color="gray",
-                     with_labels=False, alpha=0.9, ax=ax)
+    
+    # Draw graph
+    nx.draw_networkx(
+        G, pos=pos,
+        node_color=colors,
+        node_size=80,
+        edge_color="gray",
+        with_labels=False,  # No node labels (too cluttered)
+        alpha=0.9,
+        ax=ax
+    )
+    
+    # Title
     title = f"{dataset} | {method} | Graph #{idx}"
     ax.set_title(title)
     ax.set_axis_off()
 
-    # optional top-k outline
+    # Optional: Outline top-k most salient nodes
     if topk_frac and topk_frac > 0:
         k = max(1, int(topk_frac * len(s)))
-        topk = np.argsort(s)[-k:]
-        nx.draw_networkx_nodes(G, pos, nodelist=topk, node_size=180,
-                               node_color='none', edgecolors='red', linewidths=1.5, ax=ax)
+        topk = np.argsort(s)[-k:]  # Indices of top-k nodes
+        nx.draw_networkx_nodes(
+            G, pos,
+            nodelist=topk,
+            node_size=180,
+            node_color='none',
+            edgecolors='red',
+            linewidths=1.5,
+            ax=ax
+        )
 
+    # Add colorbar
     if add_colorbar:
-        sm = plt.cm.ScalarMappable(cmap='viridis', norm=plt.Normalize(vmin=0, vmax=1))
+        sm = plt.cm.ScalarMappable(
+            cmap='viridis',
+            norm=plt.Normalize(vmin=0, vmax=1)
+        )
         sm.set_array([])
-        fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04, label="node saliency (normalized)")
+        fig.colorbar(
+            sm, ax=ax,
+            fraction=0.046,
+            pad=0.04,
+            label="node saliency (normalized)"
+        )
 
+    # Save figure
     out_path = os.path.join(OUT_DIR_FIG, f"{dataset}_{method}_graph{idx}.png")
     fig.savefig(out_path, bbox_inches="tight", dpi=220)
     plt.close(fig)
 
 def plot_mean_saliency_bar(mean_value, dataset, method, idx):
+    """
+    Plot a simple bar chart showing mean saliency.
+    
+    This provides a quick summary statistic alongside the full graph.
+    
+    Args:
+        mean_value: Mean saliency across all nodes
+        dataset: Dataset name
+        method: Method name
+        idx: Graph index
+    """
     fig, ax = plt.subplots(figsize=(3, 3))
     ax.bar([0], [mean_value])
     ax.set_title(f"{dataset} | {method} | mean saliency (graph {idx})")
     ax.set_ylabel("Mean node saliency (normalized)")
     ax.set_xticks([])
+    
     out_path = os.path.join(OUT_DIR_FIG, f"{dataset}_{method}_graph{idx}_bar.png")
     fig.savefig(out_path, bbox_inches="tight", dpi=200)
     plt.close(fig)
 
-# ---------------- GIN model & true saliency ----------------
+# ============================================================================
+# GIN MODEL & TRUE GRADIENT-BASED SALIENCY
+# ============================================================================
+
 class GINSmall(nn.Module):
+    """
+    Lightweight GIN encoder for graph embeddings.
+    
+    Architecture:
+    - Stack of GIN convolution layers
+    - Global mean pooling
+    - Classification head (for supervised training)
+    
+    For saliency, we use the graph embedding (before classification head).
+    """
+    
     def __init__(self, in_dim, hidden=64, layers=3, n_classes=2, dropout=0.1):
         super().__init__()
         self.dropout = dropout
         self.convs = nn.ModuleList()
+        
         h = hidden
         for i in range(layers):
             inp = in_dim if i == 0 else h
-            mlp = nn.Sequential(nn.Linear(inp, h), nn.ReLU(), nn.Linear(h, h))
+            mlp = nn.Sequential(
+                nn.Linear(inp, h),
+                nn.ReLU(),
+                nn.Linear(h, h)
+            )
             self.convs.append(GINConv(mlp))
+        
+        # Classification head
         self.lin = nn.Linear(h, n_classes)
 
     def forward(self, x, edge_index, batch):
@@ -167,92 +384,342 @@ class GINSmall(nn.Module):
             h = conv(h, edge_index)
             h = F.relu(h)
             h = F.dropout(h, p=self.dropout, training=self.training)
+        
+        # Graph-level embedding
         g = global_mean_pool(h, batch)
+        
+        # Classification logits
         out = self.lin(g)
         return out, g
 
 @torch.no_grad()
 def make_single_batch(n: int, device):
+    """Create a batch tensor for a single graph with n nodes."""
     return torch.zeros(n, dtype=torch.long, device=device)
 
 def gin_saliency(model: nn.Module, graph, device: torch.device, mode="grad"):
     """
-    mode: 'grad' (|∂||z||/∂x|) or 'gradxinput' (|∂||z||/∂x * x|)
+    Compute TRUE gradient-based node saliency for GIN.
+    
+    ALGORITHM (Grad-CAM-like for graphs):
+    1. Forward pass: x → embedding
+    2. Compute embedding norm: ||embedding||₂
+    3. Backward pass: ∂||embedding||/∂x
+    4. Aggregate gradient per node (sum across features)
+    
+    INTUITION:
+    - Gradient measures how much each node feature affects the embedding
+    - High gradient → Node is important for the embedding
+    - This is TRUE saliency (exact gradient computation)
+    
+    MODES:
+    - "grad": |∂||z||/∂x| (gradient magnitude)
+    - "gradxinput": |∂||z||/∂x * x| (gradient × input, like Grad-CAM)
+    
+    Args:
+        model: Trained GIN model
+        graph: PyG Data object (single graph)
+        device: torch device
+        mode: "grad" or "gradxinput"
+        
+    Returns:
+        saliency: Node saliency scores [num_nodes]
     """
     model.eval()
     g = graph.to(device)
+    
+    # Ensure batch attribute exists
     if getattr(g, "batch", None) is None:
         g.batch = make_single_batch(g.num_nodes, device)
+    
+    # Enable gradient tracking for node features
     x = g.x.clone().detach().requires_grad_(True)
+    
+    # Forward pass to get embedding
     _, emb = model(x, g.edge_index, g.batch)
+    
+    # Compute L2 norm of embedding (scalar)
     score = emb.norm(p=2)
-    grads = torch.autograd.grad(score, x, retain_graph=False, create_graph=False)[0]
+    
+    # Backward pass: compute ∂score/∂x
+    grads = torch.autograd.grad(
+        score, x,
+        retain_graph=False,
+        create_graph=False
+    )[0]
+    
+    # Aggregate gradient per node
     if mode.lower() == "gradxinput":
+        # Gradient × Input (like Grad-CAM)
         sal = (grads * x).abs().sum(dim=1).detach().cpu().numpy()
     else:
+        # Just gradient magnitude
         sal = grads.abs().sum(dim=1).detach().cpu().numpy()
+    
     return sal
 
-# ---------------- NetLSD saliency ----------------
+# ============================================================================
+# NETLSD PSEUDO-SALIENCY VIA NODE DELETION
+# ============================================================================
+
 def netlsd_signature(G: nx.Graph, times=None):
+    """
+    Compute NetLSD heat trace signature.
+    
+    NetLSD characterizes graphs through heat diffusion:
+    - Normalized Laplacian eigenvalues: λ₁, λ₂, ..., λₙ
+    - Heat trace at time t: h(t) = Σᵢ exp(-t·λᵢ)
+    
+    This signature captures global spectral properties.
+    
+    Args:
+        G: NetworkX graph
+        times: Array of diffusion times (log-spaced)
+        
+    Returns:
+        signature: Heat trace values [len(times)]
+    """
     if times is None:
-        times = np.logspace(-2, 2, 128)
+        times = np.logspace(-2, 2, 128)  # 128 time points
+    
     n = G.number_of_nodes()
     if n == 0:
         return np.zeros_like(times)
+    
+    # Normalized Laplacian
     L = nx.normalized_laplacian_matrix(G).astype(float).toarray()
+    
+    # Eigenvalues
     lam = np.linalg.eigvalsh(L)
+    
+    # Heat trace: h(t) = sum_i exp(-t * lambda_i)
     return np.exp(-np.outer(times, lam)).sum(axis=1)
 
 def _dist(a, b, metric="cosine"):
+    """
+    Compute distance between two vectors.
+    
+    METRICS:
+    - "cosine": 1 - cosine_similarity (0=same, 2=opposite)
+    - "relative_l2": ||a-b|| / ||a|| (relative change)
+    - "l2": ||a-b|| (absolute change)
+    
+    Args:
+        a, b: Vectors to compare
+        metric: Distance metric
+        
+    Returns:
+        distance: Scalar distance value
+    """
     if metric == "cosine":
-        return 1.0 - float(cosine_similarity(a.reshape(1, -1), b.reshape(1, -1))[0, 0])
+        return 1.0 - float(
+            cosine_similarity(a.reshape(1, -1), b.reshape(1, -1))[0, 0]
+        )
     elif metric == "relative_l2":
         return float(np.linalg.norm(a - b) / (np.linalg.norm(a) + 1e-9))
     else:  # 'l2'
         return float(np.linalg.norm(a - b))
 
 def netlsd_saliency(graph, metric="cosine"):
+    """
+    Compute PSEUDO-saliency for NetLSD via node deletion.
+    
+    ALGORITHM:
+    1. Compute base NetLSD signature for full graph
+    2. For each node:
+       a. Remove node from graph
+       b. Recompute NetLSD signature
+       c. Measure distance between base and new signature
+       d. Distance = node saliency
+    
+    INTUITION:
+    - Removing important node → Signature changes a lot
+    - Removing unimportant node → Signature changes little
+    - This is PSEUDO-saliency (approximate, not true gradient)
+    
+    METRICS:
+    - Cosine distance: Measures direction change (best for spectral)
+    - L2 distance: Measures magnitude change
+    - Relative L2: Normalized magnitude change
+    
+    Args:
+        graph: PyG Data object
+        metric: Distance metric ("cosine", "relative_l2", "l2")
+        
+    Returns:
+        saliency: Node saliency scores [num_nodes]
+    """
+    # Convert to NetworkX
     G_base = pyg_to_nx_labeled(graph)
+    
+    # Compute base signature
     base = netlsd_signature(G_base)
+    
+    # Compute saliency per node
     sal = []
     for n in range(G_base.number_of_nodes()):
+        # Create copy and remove node
         G_del = G_base.copy()
-        G_del.remove_node(n)            # <-- simple removal
-        G_del = reindex_contiguously(G_del)
+        G_del.remove_node(n)
+        G_del = reindex_contiguously(G_del)  # Fix node IDs
+        
+        # Compute new signature
         sig = netlsd_signature(G_del)
+        
+        # Measure distance (higher = more important node)
         sal.append(_dist(base, sig, metric=metric))
+    
     return np.array(sal, dtype=float)
 
-# ---------------- Graph2Vec fast saliency: infer_vector ----------------
+# ============================================================================
+# GRAPH2VEC FAST PSEUDO-SALIENCY VIA DOC2VEC INFERENCE
+# ============================================================================
+
 def graph2vec_train_one(graph, dim=32, wl_iterations=2, epochs=8, seed=0):
-    """Train Graph2Vec on a single base graph; reuse Doc2Vec for infer_vector."""
+    """
+    Train Graph2Vec on a single graph.
+    
+    We train on just ONE graph to get a Doc2Vec model.
+    Then we'll use this model's infer_vector() for fast saliency.
+    
+    Args:
+        graph: PyG Data object
+        dim: Embedding dimension
+        wl_iterations: WL kernel depth
+        epochs: Training epochs
+        seed: Random seed
+        
+    Returns:
+        model: Trained Graph2Vec model
+    """
     G = pyg_to_nx_labeled(graph)
-    model = Graph2Vec(dimensions=dim, wl_iterations=wl_iterations, epochs=epochs,
-                      seed=seed, workers=1, min_count=1)
+    model = Graph2Vec(
+        dimensions=dim,
+        wl_iterations=wl_iterations,
+        epochs=epochs,
+        seed=seed,
+        workers=1,
+        min_count=1  # Accept all substructures
+    )
     model.fit([G])
     return model
 
 def wl_infer_embedding(model: Graph2Vec, G: nx.Graph, wl_iterations=2):
+    """
+    Infer embedding for a modified graph using existing Doc2Vec model.
+    
+    Instead of retraining Graph2Vec from scratch (slow),
+    we use the trained model's infer_vector() method (fast).
+    
+    ALGORITHM:
+    1. Generate WL document for modified graph
+    2. Use Doc2Vec.infer_vector() to get embedding
+    3. This is approximate (not retrained), but much faster
+    
+    Args:
+        model: Trained Graph2Vec model
+        G: NetworkX graph (possibly modified)
+        wl_iterations: Must match training
+        
+    Returns:
+        embedding: Inferred embedding vector
+    """
+    # Ensure proper labeling
     G = nx_with_degree_labels(reindex_contiguously(G.copy()))
+    
+    # Generate WL document
     words = wl_document(G, wl_iterations=wl_iterations)
+    
+    # Infer embedding using existing Doc2Vec model
     vec = model.model.infer_vector(words, epochs=20)
+    
     return np.asarray(vec, dtype=float)
 
-def graph2vec_saliency_fast(graph, base_model: Graph2Vec, wl_iterations=2, metric="cosine"):
+def graph2vec_saliency_fast(graph, base_model: Graph2Vec, 
+                            wl_iterations=2, metric="cosine"):
+    """
+    Compute PSEUDO-saliency for Graph2Vec via fast node deletion.
+    
+    ALGORITHM:
+    1. Get base embedding from trained model
+    2. For each node:
+       a. Remove node from graph
+       b. Infer embedding for modified graph (fast!)
+       c. Measure distance between base and new embedding
+       d. Distance = node saliency
+    
+    SPEED OPTIMIZATION:
+    - Instead of retraining Graph2Vec n times (very slow)
+    - We use infer_vector() which reuses the trained model
+    - ~100x faster than retraining
+    
+    CAVEAT:
+    - This is approximate (not exact retraining)
+    - But empirically works well for saliency
+    
+    Args:
+        graph: PyG Data object
+        base_model: Pre-trained Graph2Vec model on this graph
+        wl_iterations: Must match training
+        metric: Distance metric
+        
+    Returns:
+        saliency: Node saliency scores [num_nodes]
+    """
+    # Convert to NetworkX
     G_base = pyg_to_nx_labeled(graph)
+    
+    # Get base embedding from trained model
     base = base_model.get_embedding()[0]
+    
     n = G_base.number_of_nodes()
     sal = np.zeros(n, dtype=float)
+    
+    # Compute saliency per node
     for node in range(n):
+        # Create copy and remove node
         G_del = G_base.copy()
         G_del.remove_node(node)
+        
+        # Infer new embedding (fast!)
         emb_new = wl_infer_embedding(base_model, G_del, wl_iterations=wl_iterations)
+        
+        # Measure distance
         sal[node] = _dist(base, emb_new, metric=metric)
+    
     return sal
 
-# ---------------- Normalization helpers ----------------
+# ============================================================================
+# NORMALIZATION HELPERS
+# ============================================================================
+
 def normalize_saliency(sal, mode="minmax"):
+    """
+    Normalize saliency values for visualization and comparison.
+    
+    MODES:
+    - "minmax": Scale to [0, 1] using (x - min) / (max - min)
+      → Good for visualization (full color range)
+      
+    - "mean": Divide by mean: x / mean(x)
+      → Preserves relative magnitudes
+      
+    - "none": No normalization
+      → Raw values (not comparable across methods)
+    
+    WHY NORMALIZE?
+    - Different methods produce different scales
+    - GIN gradients might be in [0, 10]
+    - NetLSD distances might be in [0, 0.5]
+    - Normalization allows fair comparison
+    
+    Args:
+        sal: Raw saliency values
+        mode: Normalization mode
+        
+    Returns:
+        Normalized saliency values
+    """
     if mode == "minmax":
         s = sal.astype(float)
         return (s - s.min()) / (s.ptp() + 1e-9)
@@ -262,7 +729,10 @@ def normalize_saliency(sal, mode="minmax"):
     else:  # 'none'
         return sal
 
-# ---------------- Runner (all datasets & methods) ----------------
+# ============================================================================
+# MAIN RUNNER
+# ============================================================================
+
 def run_saliency(datasets, methods, sample_k=6, seed=0,
                  # GIN
                  gin_hidden=32, gin_epochs=15, gin_mode="grad",
