@@ -4,21 +4,23 @@
 """
 Task (b): Clustering of graph embeddings.
 
-- Embeddings: Graph2Vec, NetLSD (robust dense-eigs impl), GIN (supervised encoder -> embeddings)
-- Datasets: MUTAG, ENZYMES, IMDB-MULTI (configurable via CLI)
-- Clustering: KMeans, SpectralClustering
-- Metrics: ARI (primary), Silhouette (secondary)
-- Visuals: t-SNE and UMAP (colored by gold labels)
-- Compatibility: patches for SciPy errstate and UMAP↔sklearn check_array mismatch
+Embeddings: Graph2Vec, NetLSD, GIN
+Datasets: MUTAG, ENZYMES, IMDB-MULTI (configurable via CLI)
+Clustering: KMeans, SpectralClustering
+Metrics: ARI (main), Silhouette (secondary)
+Visuals:
+  - t-SNE (colored by true class and by k-means clusters)
+  - UMAP (colored by true class and by k-means clusters)
 
 Outputs:
-  - report/tables/clustering_eval.csv          (per run / per seed)
-  - report/tables/clustering_eval_agg.csv      (mean/std over seeds)
-  - report/tables/clustering_eval_top.csv      (best by ARI per dataset)
-  - report/figures/*_{tsne,umap}.png           (per dataset/method/dim)
+  report/tables/clustering_eval.csv
+  report/tables/clustering_eval_agg.csv
+  report/tables/clustering_eval_top.csv
+  report/figures/*_{tsne,umap}_true.png
+  report/figures/*_{tsne,umap}_clusters.png
 """
 
-# ---------------- Headless plotting + compat patches ----------------
+# ---------------- Headless plotting ----------------
 import matplotlib
 matplotlib.use("Agg")
 
@@ -55,6 +57,37 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans, SpectralClustering
 from sklearn.metrics import adjusted_rand_score, silhouette_score
 from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
+
+# ------------------------------------------------------------------
+# ENVIRONMENT PATCHES (compatibility fixes)
+# ------------------------------------------------------------------
+
+# 1. Some SciPy builds don't expose scipy.errstate but NetworkX calls it.
+#    We'll create scipy.errstate = numpy.errstate BEFORE importing networkx.
+import numpy as _np
+import scipy as _sp
+if not hasattr(_sp, "errstate"):
+    _sp.errstate = _np.errstate  # patch for older / weird SciPy builds
+
+# 2. Some sklearn versions don't support ensure_all_finite in check_array,
+#    but newer umap-learn will call it with that kwarg. We'll monkeypatch
+#    sklearn.utils.validation.check_array *and* sklearn.utils.check_array
+#    BEFORE importing umap.
+import sklearn.utils.validation as _suv
+import sklearn.utils as _su
+
+if "ensure_all_finite" not in inspect.signature(_suv.check_array).parameters:
+    _orig_check_array = _suv.check_array
+
+    def _wrapped_check_array(*args, ensure_all_finite=None, **kwargs):
+        # Ignore ensure_all_finite if old sklearn doesn't know it.
+        return _orig_check_array(*args, **kwargs)
+
+    _suv.check_array = _wrapped_check_array
+    _su.check_array  = _wrapped_check_array
+
+# Now it's safe to import umap
 try:
     from umap import UMAP
 except Exception:
@@ -90,14 +123,6 @@ os.makedirs(OUT_DIR_LOGS,   exist_ok=True)
 def ds_labels(ds):
     """Extract integer labels from PyTorch Geometric dataset."""
     return np.array([int(g.y) for g in ds])
-
-def infer_num_node_features(ds):
-    """Return node feature size; if missing, fall back to degree one-hot up to min(10, max degree)."""
-    x0 = getattr(ds[0], "x", None)
-    if x0 is not None and x0 is not False:
-        return ds.num_node_features
-    # Create synthetic degree feature later in collate; here just signal 1 (degree scalar)
-    return 1
 
 def attach_degree_as_feature(graph):
     """
@@ -347,7 +372,7 @@ class GINEncoder(nn.Module):
         # Message passing through GIN layers
         for conv in self.layers:
             x = conv(x, edge_index)
-            x = F.relu(x)
+            x = torch.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         
         # Graph-level pooling (aggregate node features → graph feature)
@@ -444,14 +469,14 @@ def train_gin_get_embeddings(
     # ===== EMBEDDING EXTRACTION PHASE =====
     with timed("GIN-embed"):
         model.eval()
-        emb_all = []
-        loader_eval = DataLoader(graphs, batch_size=batch_size, shuffle=False)
+        chunks = []
+        eval_loader = DataLoader(graphs, batch_size=batch_size, shuffle=False)
         with torch.no_grad():
-            for batch in loader_eval:
+            for batch in eval_loader:
                 batch = batch.to(device)
                 _, g = model(batch)
-                emb_all.append(g.cpu())
-        X = torch.cat(emb_all, dim=0).numpy()  # [n_graphs, hidden]
+                chunks.append(g.cpu())
+        X = torch.cat(chunks, dim=0).numpy()  # [num_graphs, hidden]
 
     # Apply PCA if target dimension differs from hidden dimension
     if dim != X.shape[1]:
@@ -482,7 +507,7 @@ def cluster_and_score(X, y, n_clusters, seed, algo="kmeans"):
 
     if algo == "kmeans":
         model = KMeans(n_clusters=n_clusters, n_init=20, random_state=seed)
-        pred = model.fit_predict(X)
+        pred = model.fit_predict(X_proc)
     elif algo == "spectral":
         # Spectral Clustering: Build similarity graph, then cluster eigenvectors
         # Can find non-convex clusters (more flexible than K-Means)
@@ -492,24 +517,25 @@ def cluster_and_score(X, y, n_clusters, seed, algo="kmeans"):
             affinity="rbf",  # Gaussian (RBF) similarity
             random_state=seed,
         )
-        pred = model.fit_predict(X)
+        pred = model.fit_predict(X_proc)
     else:
         raise ValueError(f"Unknown algorithm: {algo}")
 
     ari = adjusted_rand_score(y, pred)
+
+    sil = np.nan
     try:
         # Need at least 2 clusters for silhouette
         if len(np.unique(pred)) > 1:
-            sil = silhouette_score(X, pred)
-        else:
-            sil = np.nan
+            sil = silhouette_score(X_proc, pred)
     except Exception:
         sil = np.nan
 
     return {
         "ari": float(ari),
         "silhouette": float(np.nan if np.isnan(sil) else sil),
-        "labels": pred
+        "labels": pred,
+        "X_proc": X_proc,
     }
 
 # ============================================================================
@@ -528,31 +554,91 @@ def scatter_2d(X2, labels, title, outpath):
     """
     fig = plt.figure(figsize=(5, 5))
     ax = fig.add_subplot(111)
-    ax.scatter(X2[:,0], X2[:,1], c=y, s=16)
+    ax.scatter(X2[:, 0], X2[:, 1], c=labels, s=16)
     ax.set_title(title)
     ax.grid(True, linestyle="--", alpha=0.3)
     fig.tight_layout()
     fig.savefig(outpath, dpi=150)
     plt.close(fig)
 
-def plot_tsne_umap(X, y, title_prefix, out_prefix, tsne_seed=0, umap_seed=0):
-    # t-SNE
-    T = TSNE(n_components=2, random_state=tsne_seed, init="pca",
-             perplexity=min(30, max(5, len(X)//10)))
-    Xt = T.fit_transform(X)
-    scatter_2d(Xt, y, f"{title_prefix} — t-SNE", f"{out_prefix}_tsne.png")
+def plot_tsne_umap(X_proc, y_true, y_clusters, title_prefix, out_prefix,
+                   tsne_seed=0, umap_seed=0):
+    """
+    Saves four plots:
+      {out_prefix}_tsne_true.png
+      {out_prefix}_tsne_clusters.png
+      {out_prefix}_umap_true.png
+      {out_prefix}_umap_clusters.png
+    If UMAP fails, you'll still get the t-SNE plots.
+    """
 
-    # UMAP
-    n_neighbors = min(15, max(2, len(X)-1))
-    U = UMAP(n_components=2, random_state=umap_seed, n_neighbors=n_neighbors, min_dist=0.1)
-    Xu = U.fit_transform(X)
-    scatter_2d(Xu, y, f"{title_prefix} — UMAP", f"{out_prefix}_umap.png")
+    # --- t-SNE ---
+    try:
+        T = TSNE(
+            n_components=2,
+            random_state=tsne_seed,
+            init="pca",
+            perplexity=min(30, max(5, len(X_proc)//10)),
+        )
+        Xt = T.fit_transform(X_proc)
+
+        scatter_2d(
+            Xt,
+            y_true,
+            f"{title_prefix} — t-SNE (true)",
+            f"{out_prefix}_tsne_true.png",
+        )
+        scatter_2d(
+            Xt,
+            y_clusters,
+            f"{title_prefix} — t-SNE (clusters)",
+            f"{out_prefix}_tsne_clusters.png",
+        )
+    except Exception as e:
+        print(f"[warn] t-SNE plot failed: {e}")
+
+    # --- UMAP ---
+    try:
+        n_neighbors = min(15, max(2, len(X_proc) - 1))
+        U = UMAP(
+            n_components=2,
+            random_state=umap_seed,
+            n_neighbors=n_neighbors,
+            min_dist=0.1,
+        )
+        Xu = U.fit_transform(X_proc)
+
+        scatter_2d(
+            Xu,
+            y_true,
+            f"{title_prefix} — UMAP (true)",
+            f"{out_prefix}_umap_true.png",
+        )
+        scatter_2d(
+            Xu,
+            y_clusters,
+            f"{title_prefix} — UMAP (clusters)",
+            f"{out_prefix}_umap_clusters.png",
+        )
+    except Exception as e:
+        print(f"[warn] UMAP plot failed: {e}")
 
 
 # ---------------- Runner ----------------
-def run(datasets, methods, dims, seeds, plot_policy="first_seed",
-        out_csv=f"{OUT_DIR_TABLES}/clustering_eval.csv",
-        gin_hidden=64, gin_layers=3, gin_dropout=0.2, gin_epochs=30, gin_batch=64, device="cpu"):
+def run(
+    datasets,
+    methods,
+    dims,
+    seeds,
+    plot_policy="first_seed",
+    out_csv=f"{OUT_DIR_TABLES}/clustering_eval.csv",
+    gin_hidden=64,
+    gin_layers=3,
+    gin_dropout=0.2,
+    gin_epochs=30,
+    gin_batch=64,
+    device="cpu",
+):
     """
     plot_policy: 'none' | 'first_seed' | 'all'
     """
@@ -613,17 +699,35 @@ def run(datasets, methods, dims, seeds, plot_policy="first_seed",
 
                     # Prepare result rows
                     row_km = dict(
-                        dataset=ds_name, method=method, dim=dim, seed=seed, algo="kmeans",
-                        ari=round(res_km["ari"], 4),
-                        silhouette=float(np.nan if np.isnan(res_km["silhouette"]) else round(res_km["silhouette"], 4)),
-                        n_graphs=len(ds), n_clusters=n_clusters
+                        dataset=ds_name,
+                        method=method,
+                        dim=dim,
+                        seed=seed,
+                        algo="kmeans",
+                        ari=res_km["ari"],
+                        silhouette=(
+                            None
+                            if np.isnan(res_km["silhouette"])
+                            else float(res_km["silhouette"])
+                        ),
+                        n_graphs=len(ds),
+                        n_clusters=n_clusters,
                     )
                     
                     row_sp = dict(
-                        dataset=ds_name, method=method, dim=dim, seed=seed, algo="spectral",
-                        ari=round(res_sp["ari"], 4),
-                        silhouette=float(np.nan if np.isnan(res_sp["silhouette"]) else round(res_sp["silhouette"], 4)),
-                        n_graphs=len(ds), n_clusters=n_clusters
+                        dataset=ds_name,
+                        method=method,
+                        dim=dim,
+                        seed=seed,
+                        algo="spectral",
+                        ari=res_sp["ari"],
+                        silhouette=(
+                            None
+                            if np.isnan(res_sp["silhouette"])
+                            else float(res_sp["silhouette"])
+                        ),
+                        n_graphs=len(ds),
+                        n_clusters=n_clusters,
                     )
 
                     # Print results for monitoring
@@ -639,17 +743,22 @@ def run(datasets, methods, dims, seeds, plot_policy="first_seed",
                     # - 'first_seed': only plot for first seed (default)
                     # - 'all': plot for every seed (most thorough)
                     do_plots = (
-                        plot_policy == "all" or
-                        (plot_policy == "first_seed" and seed == first_seed)
+                        plot_policy == "all"
+                        or (plot_policy == "first_seed" and seed == first_seed)
                     )
                     
                     if do_plots:
                         prefix = f"{OUT_DIR_FIGS}/{ds_name}_{method}_d{dim}"
                         title  = f"{ds_name} | {method} (d={dim})"
-                        try:
-                            plot_tsne_umap(X, y, title, prefix)
-                        except Exception as e:
-                            print(f"[warn] plot failed: {e}")
+                        plot_tsne_umap(
+                            X_proc=res_km["X_proc"],
+                            y_true=y,
+                            y_clusters=res_km["labels"],
+                            title_prefix=title,
+                            out_prefix=prefix,
+                            tsne_seed=seed,
+                            umap_seed=seed,
+                        )
 
                     # ===== STEP 4: PROGRESSIVE SAVE =====
                     # Save after each configuration so we don't lose results

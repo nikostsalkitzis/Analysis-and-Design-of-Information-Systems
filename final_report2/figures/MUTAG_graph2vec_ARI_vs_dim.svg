@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" font-family="sans-serif" font-size="12">
+<rect x="0" y="0" width="600" height="400" fill="#ffffff"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="344.00" text-anchor="end" fill="#000000">-0.0277</text>
+<line x1="60" y1="270.00" x2="580" y2="270.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="274.00" text-anchor="end" fill="#000000">0.00639</text>
+<line x1="60" y1="200.00" x2="580" y2="200.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="204.00" text-anchor="end" fill="#000000">0.0405</text>
+<line x1="60" y1="130.00" x2="580" y2="130.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="134.00" text-anchor="end" fill="#000000">0.0746</text>
+<line x1="60" y1="60.00" x2="580" y2="60.00" stroke="#cccccc" stroke-width="1" stroke-dasharray="4,4"/>
+<text x="52" y="64.00" text-anchor="end" fill="#000000">0.109</text>
+<line x1="60" y1="60" x2="60" y2="340" stroke="#000000" stroke-width="1.5"/>
+<line x1="60" y1="340.00" x2="580" y2="340.00" stroke="#000000" stroke-width="1.5"/>
+<line x1="60.00" y1="340.00" x2="60.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="60.00" y="360.00" text-anchor="middle" fill="#000000">16</text>
+<line x1="94.67" y1="340.00" x2="94.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="94.67" y="360.00" text-anchor="middle" fill="#000000">32</text>
+<line x1="164.00" y1="340.00" x2="164.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="164.00" y="360.00" text-anchor="middle" fill="#000000">64</text>
+<line x1="302.67" y1="340.00" x2="302.67" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="302.67" y="360.00" text-anchor="middle" fill="#000000">128</text>
+<line x1="580.00" y1="340.00" x2="580.00" y2="345.00" stroke="#000000" stroke-width="1.5"/>
+<text x="580.00" y="360.00" text-anchor="middle" fill="#000000">256</text>
+<polygon points="60.00,144.59 94.67,235.78 164.00,174.86 302.67,176.10 580.00,163.71 580.00,286.67 302.67,290.03 164.00,291.70 94.67,270.59 60.00,283.52" fill="#1f77b4" opacity="0.2" stroke="none"/>
+<polyline points="60.00,214.05 94.67,253.18 164.00,233.28 302.67,233.07 580.00,225.19" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="60.00" cy="214.05" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="94.67" cy="253.18" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="164.00" cy="233.28" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="302.67" cy="233.07" r="3" fill="#1f77b4" stroke="none"/>
+<circle cx="580.00" cy="225.19" r="3" fill="#1f77b4" stroke="none"/>
+<polygon points="60.00,72.73 94.67,95.96 164.00,233.13 302.67,261.68 580.00,261.68 580.00,261.68 302.67,261.68 164.00,269.33 94.67,317.78 60.00,327.27" fill="#d62728" opacity="0.2" stroke="none"/>
+<polyline points="60.00,200.00 94.67,206.87 164.00,251.23 302.67,261.68 580.00,261.68" fill="none" stroke="#d62728" stroke-width="2"/>
+<circle cx="60.00" cy="200.00" r="3" fill="#d62728" stroke="none"/>
+<circle cx="94.67" cy="206.87" r="3" fill="#d62728" stroke="none"/>
+<circle cx="164.00" cy="251.23" r="3" fill="#d62728" stroke="none"/>
+<circle cx="302.67" cy="261.68" r="3" fill="#d62728" stroke="none"/>
+<circle cx="580.00" cy="261.68" r="3" fill="#d62728" stroke="none"/>
+<rect x="460" y="70" width="12" height="12" fill="#1f77b4" opacity="0.6" stroke="#1f77b4" stroke-width="2"/>
+<text x="478" y="80" fill="#000000">KMeans</text>
+<rect x="460" y="88" width="12" height="12" fill="#d62728" opacity="0.6" stroke="#d62728" stroke-width="2"/>
+<text x="478" y="98" fill="#000000">Spectral</text>
+<text x="300.00" y="30" text-anchor="middle" font-size="14" font-weight="bold" fill="#000000">MUTAG — ARI vs. Dim (graph2vec) (n_runs=3)</text>
+<text x="320.00" y="380" text-anchor="middle" fill="#000000">Embedding dimension</text>
+<text x="20" y="200.00" transform="rotate(-90 20,200.00)" text-anchor="middle" fill="#000000">ARI (mean ± std)</text>
+</svg>

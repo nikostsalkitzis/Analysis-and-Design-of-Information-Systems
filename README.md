@@ -165,3 +165,21 @@ python3 counterfactual_graph_explanations.py \
 |---------------|-----------|--------------|------------------|
 | `--datasets` | list | `["MUTAG", "ENZYMES", "IMDB-MULTI"]` | Names of TUDatasets to analyze for counterfactual explanations. |
 | `--seed` | int | `0` | Random seed for reproducibility of model training and saliency computation. |
+
+# Extra Task 4) Combined Embeddings
+In order to run the thrid extra task, please run the following:
+```bash
+python final_task9.py \
+  --datasets MUTAG ENZYMES IMDB-MULTI \
+  --combos graph2vec+netlsd graph2vec+gin netlsd+gin graph2vec+netlsd+gin \
+  --dims 16 32 64 128 256 \
+  --seeds 0 1 2 \
+  --device cpu
+```
+
+| **Argument** | **Type** | **Default** | **Description** |
+|---------------|-----------|--------------|------------------|
+| `--datasets` | list | `["MUTAG", "ENZYMES", "IMDB-MULTI"]` | Names of TUDatasets to analyze for counterfactual explanations. |
+| `--combos` | string | `graph2vec+netlsd graph2vec+gin netlsd+gin graph2vec+netlasd+gin` | Names of embeddings that will be combined|
+| `--dims` | list of int| `16 32 64 128 256` | The **embedding dimensions** (vector lengths) to evaluate. You can include multiple values to compare performance. |
+| `--seed` | int | `0` | Random seed for reproducibility of model training and saliency computation. |

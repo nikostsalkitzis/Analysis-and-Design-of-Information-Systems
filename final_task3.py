@@ -98,8 +98,8 @@ from karateclub import Graph2Vec
 # ============================================================================
 
 # --------- Paths ---------
-OUT_DIR_TABLES = "report/tables"
-OUT_DIR_FIGS   = "report/figures"
+OUT_DIR_TABLES = "report_new/tables"
+OUT_DIR_FIGS   = "report_new/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS,   exist_ok=True)
 
@@ -208,8 +208,9 @@ def perturb_edges(g: Data, level: float, seed: int) -> Data:
     attempts = 0
     while len(possible) < k and attempts < 20 * k:
         u = random.randrange(n); v = random.randrange(n)
-        if u == v: 
-            attempts += 1; continue
+        if u == v:
+            attempts += 1
+            continue
         e = tuple(sorted((u, v)))
         
         # Only add if not already in graph
@@ -222,8 +223,12 @@ def perturb_edges(g: Data, level: float, seed: int) -> Data:
     und.update(possible)
 
     # Build new edge_index (both directions)
-    u, v = zip(*und) if und else ([], [])
-    ei = torch.tensor([list(u)+list(v), list(v)+list(u)], dtype=torch.long)
+    if len(und) == 0:
+        ei = torch.zeros((2,0), dtype=torch.long)
+    else:
+        u, v = zip(*und)
+        ei = torch.tensor([list(u)+list(v), list(v)+list(u)], dtype=torch.long)
+
     return Data(x=g.x.clone(), edge_index=ei, y=g.y, num_nodes=n)
 
 def perturb_attrs(g: Data, level: float, seed: int) -> Data:
@@ -559,63 +564,147 @@ def emb_stability(X_clean, X_pert):
 # ============================================================================
 
 def _styled_fig_suptitle(fig, title):
-    # Put the title in suptitle with extra top margin to avoid clipping
-    fig.suptitle(title, fontsize=16, y=0.98)
-    fig.subplots_adjust(top=0.86)
+    fig.suptitle(title, fontsize=14, y=0.92, fontweight="bold")
+    fig.subplots_adjust(top=0.8)
 
-def plot_delta_auc(df, dataset, perturb_type, outpath):
-    fig, ax = plt.subplots(figsize=(9,5))
-    _styled_fig_suptitle(fig, f"{dataset} — ΔAUC (perturbed − clean) vs. level ({perturb_type})")
+def _plot_with_shaded_std(ax, levels, means, stds, label):
+    line, = ax.plot(
+        levels,
+        means,
+        marker="o",
+        markersize=5,
+        linewidth=2,
+        alpha=0.9,
+        label=label,
+    )
+    if len(levels) > 1:
+        ax.fill_between(
+            levels,
+            np.array(means) - np.nan_to_num(stds),
+            np.array(means) + np.nan_to_num(stds),
+            alpha=0.15
+        )
+    return line
 
-    methods = df["method"].unique()
-    levels  = sorted(df["level"].unique())
+def _plot_metric_per_classifier_method(
+    df,
+    dataset,
+    perturb_type,
+    clf_key,          # "svm" or "mlp"
+    metric_key,       # "acc", "f1", "auc"
+    ylabel,
+    outpath
+):
+    """
+    One figure:
+      - fixed dataset
+      - fixed perturb type ("edges"/"attrs")
+      - fixed classifier ("svm"/"mlp")
+      - fixed metric ("acc"/"f1"/"auc")
+      - fixed embedding method (df is already filtered to this method)
+    We draw a line per dim only.
+    """
+    method_name = df["method"].iloc[0]
+    levels = sorted(df["level"].unique())
 
-    for meth in methods:
-        for dim in sorted(df[df.method==meth]["dim"].unique()):
-            sub = df[(df.method==meth) & (df.dim==dim)]
-            means = [sub[sub.level==lv]["delta_auc_mlp"].mean() for lv in levels]  # use MLP deltas (or swap to SVM)
-            stds  = [sub[sub.level==lv]["delta_auc_mlp"].std()  for lv in levels]
-            ax.plot(levels, means, marker="o", label=f"{meth} d={dim}")
-            if len(levels) > 1:
-                ax.fill_between(levels,
-                                np.array(means) - np.nan_to_num(stds),
-                                np.array(means) + np.nan_to_num(stds),
-                                alpha=0.15)
+    fig, ax = plt.subplots(figsize=(5.5,4))
+
+    _styled_fig_suptitle(
+        fig,
+        f"{dataset} — Δ{metric_key.upper()} ({clf_key.upper()}) vs. perturb level ({perturb_type})\n{method_name}"
+    )
+
+    legend_handles = []
+    legend_labels  = []
+
+    for dim in sorted(df["dim"].unique()):
+        sub = df[df["dim"] == dim]
+        means = [sub[sub.level==lv][f"delta_{metric_key}_{clf_key}"].mean() for lv in levels]
+        stds  = [sub[sub.level==lv][f"delta_{metric_key}_{clf_key}"].std()  for lv in levels]
+
+        h = _plot_with_shaded_std(
+            ax,
+            levels,
+            means,
+            stds,
+            label=f"d={dim}"
+        )
+        legend_handles.append(h)
+        legend_labels.append(f"d={dim}")
 
     ax.axhline(0, lw=1, ls="--", alpha=0.6)
-    ax.set_xlabel("Perturbation level (relative)")
-    ax.set_ylabel("ΔAUC")
+    ax.set_xlabel("Perturbation level (relative)", fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=11)
     ax.grid(True, ls="--", alpha=0.3)
-    ax.legend(ncol=2, frameon=False, loc="best")
-    fig.tight_layout(rect=[0,0,1,0.95])
-    fig.savefig(outpath, dpi=150, bbox_inches="tight")
+
+    ax.legend(
+        legend_handles,
+        legend_labels,
+        loc="best",
+        frameon=False,
+        fontsize=9,
+    )
+
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-def plot_embed_drift(df, dataset, perturb_type, outpath):
-    fig, ax = plt.subplots(figsize=(9,5))
-    _styled_fig_suptitle(fig, f"{dataset} — Embedding drift (mean L2) vs. level ({perturb_type})")
+def _plot_embed_stat_per_method(
+    df,
+    dataset,
+    perturb_type,
+    colname,          # "l2" or "cos"
+    ylabel,
+    title_metric_name,
+    outpath
+):
+    """
+    For embedding drift / cosine stability, classifier doesn't apply.
+    We still split per dataset x perturb x method.
+    We plot a line for each dim, over levels.
+    """
+    method_name = df["method"].iloc[0]
+    levels = sorted(df["level"].unique())
 
-    methods = df["method"].unique()
-    levels  = sorted(df["level"].unique())
+    fig, ax = plt.subplots(figsize=(5.5,4))
 
-    for meth in methods:
-        for dim in sorted(df[df.method==meth]["dim"].unique()):
-            sub = df[(df.method==meth) & (df.dim==dim)]
-            means = [sub[sub.level==lv]["l2"].mean() for lv in levels]
-            stds  = [sub[sub.level==lv]["l2"].std()  for lv in levels]
-            ax.plot(levels, means, marker="o", label=f"{meth} d={dim}")
-            if len(levels) > 1:
-                ax.fill_between(levels,
-                                np.array(means) - np.nan_to_num(stds),
-                                np.array(means) + np.nan_to_num(stds),
-                                alpha=0.15)
+    _styled_fig_suptitle(
+        fig,
+        f"{dataset} — {title_metric_name} vs. perturb level ({perturb_type})\n{method_name}"
+    )
 
-    ax.set_xlabel("Perturbation level (relative)")
-    ax.set_ylabel("Mean L2 drift")
+    legend_handles = []
+    legend_labels  = []
+
+    for dim in sorted(df["dim"].unique()):
+        sub = df[df["dim"] == dim]
+        means = [sub[sub.level==lv][colname].mean() for lv in levels]
+        stds  = [sub[sub.level==lv][colname].std()  for lv in levels]
+
+        h = _plot_with_shaded_std(
+            ax,
+            levels,
+            means,
+            stds,
+            label=f"d={dim}"
+        )
+        legend_handles.append(h)
+        legend_labels.append(f"d={dim}")
+
+    ax.set_xlabel("Perturbation level (relative)", fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=11)
     ax.grid(True, ls="--", alpha=0.3)
-    ax.legend(ncol=2, frameon=False, loc="best")
-    fig.tight_layout(rect=[0,0,1,0.95])
-    fig.savefig(outpath, dpi=150, bbox_inches="tight")
+
+    ax.legend(
+        legend_handles,
+        legend_labels,
+        loc="best",
+        frameon=False,
+        fontsize=9,
+    )
+
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 # ============================================================================
@@ -744,23 +833,58 @@ def aggregate_and_plot(df_all):
     # ===== GENERATE PLOTS =====
     # Loop over all combinations
     for ds in df_all["dataset"].unique():
-        sub = df_all[df_all["dataset"] == ds]
+        sub_ds = df_all[df_all["dataset"] == ds]
         for perturb in ["edges", "attrs"]:
-            subp = sub[sub["perturb"] == perturb]
+            subp = sub_ds[sub_ds["perturb"] == perturb]
 
-            # ΔAUC (MLP) vs level
-            plot_delta_auc(
-                subp.rename(columns={"delta_auc_mlp": "delta_auc_mlp"}),
-                ds, perturb,
-                os.path.join(OUT_DIR_FIGS, f"{ds}_delta_auc_{perturb}.png")
-            )
+            # loop per embedding method
+            for method_name in subp["method"].unique():
+                subm = subp[subp["method"] == method_name]
 
-            # Embedding drift (L2) vs level
-            plot_embed_drift(
-                subp,
-                ds, perturb,
-                os.path.join(OUT_DIR_FIGS, f"{ds}_embed_drift_{perturb}.png")
-            )
+                # --- classifier-based metrics ---
+                # for each classifier and metric, make a figure
+                for clf_key in ["svm", "mlp"]:
+                    for metric_key, ylabel in [
+                        ("acc", "ΔAccuracy"),
+                        ("f1",  "ΔF1"),
+                        ("auc", "ΔAUC"),
+                    ]:
+                        outname = f"{ds}_{perturb}_{method_name}_{clf_key}_delta_{metric_key}.png"
+                        outpath = os.path.join(OUT_DIR_FIGS, outname)
+                        _plot_metric_per_classifier_method(
+                            df=subm,
+                            dataset=ds,
+                            perturb_type=perturb,
+                            clf_key=clf_key,
+                            metric_key=metric_key,
+                            ylabel=ylabel,
+                            outpath=outpath
+                        )
+
+                # --- embedding stats (classifier-agnostic) ---
+                # L2 drift
+                outname_l2 = f"{ds}_{perturb}_{method_name}_embed_drift_l2.png"
+                _plot_embed_stat_per_method(
+                    df=subm,
+                    dataset=ds,
+                    perturb_type=perturb,
+                    colname="l2",
+                    ylabel="Mean L2 drift",
+                    title_metric_name="Embedding drift (mean L2)",
+                    outpath=os.path.join(OUT_DIR_FIGS, outname_l2)
+                )
+
+                # cosine stability
+                outname_cos = f"{ds}_{perturb}_{method_name}_embed_cosine.png"
+                _plot_embed_stat_per_method(
+                    df=subm,
+                    dataset=ds,
+                    perturb_type=perturb,
+                    colname="cos",
+                    ylabel="Mean cosine similarity",
+                    title_metric_name="Embedding stability (mean cosine)",
+                    outpath=os.path.join(OUT_DIR_FIGS, outname_cos)
+                )
 
 # --------- CLI ---------
 def parse_args():

@@ -48,7 +48,7 @@ WORKFLOW:
 import matplotlib
 matplotlib.use("Agg")  # Headless plotting
 
-import os, time, argparse, warnings, random
+import os, argparse, warnings, random
 warnings.filterwarnings("ignore")
 
 import numpy as np
@@ -69,7 +69,6 @@ from torch_geometric.nn import GINConv, global_mean_pool
 from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, label_binarize
-from sklearn.svm import LinearSVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
@@ -419,20 +418,39 @@ def get_embeddings(method, graphs, dim, seed):
 
 
 # ---------------- Classifier & evaluation ----------------
-def eval_classifier(X_train, y_train, X_test, y_test, seed):
-    classes = np.unique(y_train)
-    clf = make_pipeline(StandardScaler(with_mean=True), MLPClassifier(hidden_layer_sizes=(128,),
-                                                                      activation="relu",
-                                                                      solver="adam",
-                                                                      max_iter=500,
-                                                                      random_state=seed))
-    clf.fit(X_train, y_train)
-    y_pred = clf.predict(X_test)
-    y_score = clf.predict_proba(X_test) if hasattr(clf, "predict_proba") else None
+def fit_clf(X, y, seed):
+    clf = make_pipeline(
+        StandardScaler(with_mean=True),
+        MLPClassifier(
+            hidden_layer_sizes=(128,),
+            activation="relu",
+            solver="adam",
+            max_iter=500,
+            random_state=seed
+        )
+    )
+    clf.fit(X, y)
+    return clf
 
-    acc = accuracy_score(y_test, y_pred)
-    f1  = f1_score(y_test, y_pred, average="macro")
-    auc = auc_any(y_test, y_score, classes=np.unique(y_test))
+def eval_within(X, y, seed):
+    clf = fit_clf(X, y, seed)
+    y_pred = clf.predict(X)
+    y_score = clf.predict_proba(X) if hasattr(clf, "predict_proba") else None
+
+    acc = accuracy_score(y, y_pred)
+    f1  = f1_score(y, y_pred, average="macro")
+    auc = auc_any(y, y_score, classes=np.unique(y))
+
+    return clf, acc, f1, auc
+
+def eval_transfer(clf, X_tgt, y_tgt):
+    y_pred = clf.predict(X_tgt)
+    y_score = clf.predict_proba(X_tgt) if hasattr(clf, "predict_proba") else None
+
+    acc = accuracy_score(y_tgt, y_pred)
+    f1  = f1_score(y_tgt, y_pred, average="macro")
+    auc = auc_any(y_tgt, y_score, classes=np.unique(y_tgt))
+
     return acc, f1, auc
 
 
@@ -547,7 +565,18 @@ def run_transfer(datasets, methods, dims, seeds):
                             delta_auc=delta_auc # Transfer gap
                         ))
 
-                        print(f"{method} {src}->{tgt} dim={dim} seed={seed} AUC={auc:.3f}")
+                            delta_acc=acc_src - acc,
+                            delta_f1=f1_src - f1,
+                            delta_auc=auc_src - auc,
+                        )
+                        results.append(res)
+
+                        print(
+                            f"{method.upper()} {src}->{tgt} dim={dim} seed={seed} | "
+                            f"ACC={acc:.3f} (Δ={res['delta_acc']:+.3f})  "
+                            f"F1={f1:.3f} (Δ={res['delta_f1']:+.3f})  "
+                            f"AUC={auc:.3f} (Δ={res['delta_auc']:+.3f})"
+                        )
 
     # ===== SAVE RESULTS =====
     df = pd.DataFrame(results)
