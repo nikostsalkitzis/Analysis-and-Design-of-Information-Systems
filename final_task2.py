@@ -4,6 +4,8 @@
 """
 Task (b): Clustering of graph embeddings.
 
+This script evaluates unsupervised clustering performance of graph embeddings.
+
 Embeddings: Graph2Vec, NetLSD, GIN
 Datasets: MUTAG, ENZYMES, IMDB-MULTI (configurable via CLI)
 Clustering: KMeans, SpectralClustering
@@ -20,12 +22,16 @@ Outputs:
   report/figures/*_{tsne,umap}_clusters.png
 """
 
+# ============================================================================
+# ENVIRONMENT SETUP & COMPATIBILITY PATCHES
+# ============================================================================
+
 # ---------------- Headless plotting ----------------
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # Use non-interactive backend for headless plotting
 
 import os, time, argparse, json, warnings, inspect
-warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore")  # Suppress scientific library warnings
 
 import numpy as np
 import pandas as pd
@@ -43,17 +49,17 @@ from sklearn.preprocessing import StandardScaler
 # ENVIRONMENT PATCHES (compatibility fixes)
 # ------------------------------------------------------------------
 
-# 1. Some SciPy builds don't expose scipy.errstate but NetworkX calls it.
-#    We'll create scipy.errstate = numpy.errstate BEFORE importing networkx.
+# PATCH 1: Fix missing scipy.errstate in some environments
+# Some SciPy builds don't expose scipy.errstate, but NetworkX calls it internally.
+# We patch it BEFORE importing networkx to prevent ImportError.
 import numpy as _np
 import scipy as _sp
 if not hasattr(_sp, "errstate"):
-    _sp.errstate = _np.errstate  # patch for older / weird SciPy builds
+    _sp.errstate = _np.errstate  # Borrow from NumPy
 
-# 2. Some sklearn versions don't support ensure_all_finite in check_array,
-#    but newer umap-learn will call it with that kwarg. We'll monkeypatch
-#    sklearn.utils.validation.check_array *and* sklearn.utils.check_array
-#    BEFORE importing umap.
+# PATCH 2: Fix UMAP compatibility with older scikit-learn versions
+# Newer UMAP calls check_array with 'ensure_all_finite' kwarg that old sklearn doesn't support.
+# We monkeypatch sklearn's check_array BEFORE importing umap.
 import sklearn.utils.validation as _suv
 import sklearn.utils as _su
 
@@ -61,13 +67,13 @@ if "ensure_all_finite" not in inspect.signature(_suv.check_array).parameters:
     _orig_check_array = _suv.check_array
 
     def _wrapped_check_array(*args, ensure_all_finite=None, **kwargs):
-        # Ignore ensure_all_finite if old sklearn doesn't know it.
+        # Ignore ensure_all_finite parameter if old sklearn doesn't support it
         return _orig_check_array(*args, **kwargs)
 
     _suv.check_array = _wrapped_check_array
     _su.check_array  = _wrapped_check_array
 
-# Now it's safe to import umap
+# Now it's safe to import UMAP after the patches
 try:
     from umap import UMAP
 except Exception:
@@ -83,10 +89,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GINConv, global_mean_pool
 
-from karateclub import Graph2Vec  # NetLSD implemented below
+from karateclub import Graph2Vec  # Unsupervised graph embedding
 
+# ============================================================================
+# OUTPUT DIRECTORIES
+# ============================================================================
 
-# ---------------- Paths ----------------
 OUT_DIR_TABLES = "report/tables"
 OUT_DIR_FIGS   = "report/figures"
 OUT_DIR_LOGS   = "report/logs"
@@ -94,15 +102,20 @@ os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS,   exist_ok=True)
 os.makedirs(OUT_DIR_LOGS,   exist_ok=True)
 
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
 
-# ---------------- Utilities ----------------
 def ds_labels(ds):
+    """Extract integer labels from PyTorch Geometric dataset."""
     return np.array([int(g.y) for g in ds])
 
 def attach_degree_as_feature(graph):
     """
-    If graph.x is missing or None, create a single feature column = node degree.
-    Needed for GIN on datasets without node attributes (e.g. IMDB-MULTI).
+    Add node degree as feature for graphs without node attributes.
+    
+    Some datasets (e.g., IMDB-MULTI) don't have node features. GIN requires
+    node features, so we create a single feature column containing node degree.
     """
     if getattr(graph, "x", None) is None:
         G = to_networkx(graph, to_undirected=True)
@@ -112,8 +125,9 @@ def attach_degree_as_feature(graph):
 
 def to_nx_with_labels(ds_slice):
     """
-    Convert PyG graphs to undirected NetworkX graphs and assign each node
-    a discrete 'label' feature (here: its degree) for Graph2Vec.
+    Convert PyG graphs to NetworkX format with node labels.
+    
+    Graph2Vec requires discrete node labels. Here we use node degree as the label.
     """
     Gs = []
     for g in ds_slice:
@@ -126,16 +140,25 @@ def to_nx_with_labels(ds_slice):
 
 @contextmanager
 def timed(name="block"):
+    """Context manager to measure execution time."""
     t0 = time.perf_counter()
     try:
         yield
     finally:
         print(f"[{name}] time={time.perf_counter()-t0:.2f}s")
 
+# ============================================================================
+# EMBEDDING METHODS: Graph2Vec & NetLSD
+# ============================================================================
 
-# ---------------- Embeddings: Graph2Vec & NetLSD ----------------
 def embed_graph2vec(ds_slice, dim=128, seed=0, epochs=20,
                     wl_iterations=2, min_count=5):
+    """
+    Generate Graph2Vec embeddings.
+    
+    Graph2Vec treats graphs as "documents" and their substructures
+    (from Weisfeiler-Lehman kernel) as "words", then applies doc2vec training.
+    """
     Gs = to_nx_with_labels(ds_slice)
     with timed("Graph2Vec"):
         model = Graph2Vec(
@@ -152,19 +175,29 @@ def embed_graph2vec(ds_slice, dim=128, seed=0, epochs=20,
 
 def _netlsd_signature_dense(G, times):
     """
-    Compute NetLSD-style heat trace signature using the full eigendecomposition
-    of the normalized Laplacian. Robust for small graphs.
+    Compute NetLSD heat trace signature using dense eigendecomposition.
+    
+    Heat trace at time t: h(t) = sum_i exp(-t * λ_i)
+    where λ_i are eigenvalues of the normalized Laplacian.
+    Captures graph structure at different scales.
     """
     n = G.number_of_nodes()
     if n == 0:
         return np.zeros_like(times)
     L = nx.normalized_laplacian_matrix(G).astype(float).toarray()
-    lam = np.linalg.eigvalsh(L)  # Laplacian symmetric => stable eigenvalues
+    lam = np.linalg.eigvalsh(L)  # Eigenvalues (real for symmetric L)
     # heat trace at each diffusion time t: sum(exp(-t * lambda_i))
     return np.exp(-np.outer(times, lam)).sum(axis=1)
 
 def embed_netlsd(ds_slice, dim=128, pca_seed=0,
                  n_times=256, t_min=1e-2, t_max=1e2):
+    """
+    Generate NetLSD embeddings with PCA compression.
+    
+    Process:
+    1. Compute heat traces at log-spaced times
+    2. Apply PCA to compress to desired dimension
+    """
     times = np.logspace(np.log10(t_min), np.log10(t_max), num=n_times)
     Gs = [to_networkx(g, to_undirected=True) for g in ds_slice]
     with timed("NetLSD"):
@@ -175,9 +208,17 @@ def embed_netlsd(ds_slice, dim=128, pca_seed=0,
             X = PCA(n_components=dim, random_state=pca_seed).fit_transform(X)
     return X
 
+# ============================================================================
+# EMBEDDING METHOD: GIN (Graph Isomorphism Network)
+# ============================================================================
 
-# ---------------- Embeddings: GIN ----------------
 class GINEncoder(nn.Module):
+    """
+    GIN encoder for supervised graph embedding.
+    
+    We train this model using graph labels, then extract embeddings from the
+    penultimate layer for clustering evaluation.
+    """
     def __init__(self, in_dim, hidden=64, layers=3, dropout=0.2, n_classes=2):
         super().__init__()
         self.dropout = dropout
@@ -217,8 +258,8 @@ def train_gin_get_embeddings(
     device="cpu",
 ):
     """
-    Train GIN on the known labels (supervised), then export the pooled
-    graph embedding from the penultimate layer. If hidden != dim, apply PCA.
+    Train GIN on known labels (supervised), then export graph embeddings.
+    If hidden != dim, apply PCA to match target dimension.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -265,20 +306,27 @@ def train_gin_get_embeddings(
 
     return X
 
+# ============================================================================
+# CLUSTERING & EVALUATION METRICS
+# ============================================================================
 
-# ---------------- Clustering & metrics ----------------
 def preprocess_for_clustering(X):
     """
     Standardize features before distance-based clustering/metrics.
-    This makes different embeddings and dimensions more comparable.
+    Makes different embeddings and dimensions more comparable.
     """
     scaler = StandardScaler()
     return scaler.fit_transform(X)
 
 def cluster_and_score(X, y, n_clusters, seed, algo="kmeans"):
     """
-    Run clustering on standardized X.
-    Returns ARI, silhouette, cluster assignments, and the standardized X.
+    Run clustering on standardized X and compute metrics.
+    
+    Metrics:
+    - ARI (Adjusted Rand Index): agreement with true labels [-1, 1]
+    - Silhouette: cluster cohesion/separation [-1, 1]
+    
+    Returns dict with ari, silhouette, cluster labels, and processed X.
     """
     X_proc = preprocess_for_clustering(X)
 
@@ -312,9 +360,12 @@ def cluster_and_score(X, y, n_clusters, seed, algo="kmeans"):
         "X_proc": X_proc,
     }
 
+# ============================================================================
+# VISUALIZATION: t-SNE & UMAP
+# ============================================================================
 
-# ---------------- Visualization (t-SNE + UMAP) ----------------
 def scatter_2d(X2, labels, title, outpath):
+    """Create a 2D scatter plot colored by labels."""
     fig = plt.figure(figsize=(5, 5))
     ax = fig.add_subplot(111)
     ax.scatter(X2[:, 0], X2[:, 1], c=labels, s=16)
@@ -327,15 +378,18 @@ def scatter_2d(X2, labels, title, outpath):
 def plot_tsne_umap(X_proc, y_true, y_clusters, title_prefix, out_prefix,
                    tsne_seed=0, umap_seed=0):
     """
+    Generate t-SNE and UMAP 2D visualizations.
+    
     Saves four plots:
       {out_prefix}_tsne_true.png
       {out_prefix}_tsne_clusters.png
       {out_prefix}_umap_true.png
       {out_prefix}_umap_clusters.png
-    If UMAP fails, you'll still get the t-SNE plots.
+    
+    These help visualize cluster structure and class separation.
     """
 
-    # --- t-SNE ---
+    # --- t-SNE: preserves local structure ---
     try:
         T = TSNE(
             n_components=2,
@@ -360,7 +414,7 @@ def plot_tsne_umap(X_proc, y_true, y_clusters, title_prefix, out_prefix,
     except Exception as e:
         print(f"[warn] t-SNE plot failed: {e}")
 
-    # --- UMAP ---
+    # --- UMAP: preserves local and global structure ---
     try:
         n_neighbors = min(15, max(2, len(X_proc) - 1))
         U = UMAP(
@@ -386,8 +440,10 @@ def plot_tsne_umap(X_proc, y_true, y_clusters, title_prefix, out_prefix,
     except Exception as e:
         print(f"[warn] UMAP plot failed: {e}")
 
+# ============================================================================
+# MAIN EXPERIMENT RUNNER
+# ============================================================================
 
-# ---------------- Runner ----------------
 def run(
     datasets,
     methods,
@@ -403,6 +459,15 @@ def run(
     device="cpu",
 ):
     """
+    Run full clustering experiment.
+    
+    For each (dataset, method, dim, seed):
+    1. Generate embeddings
+    2. Run KMeans and Spectral clustering
+    3. Compute ARI and Silhouette
+    4. Optionally generate t-SNE/UMAP plots
+    5. Save results progressively
+    
     plot_policy: 'none' | 'first_seed' | 'all'
     """
     rows = []
@@ -492,7 +557,7 @@ def run(
 
                     rows.extend([row_km, row_sp])
 
-                    # 3) Plots (t-SNE + UMAP) for first_seed or for all
+                    # 3) Plots (t-SNE + UMAP) for first_seed or all
                     do_plots = (
                         plot_policy == "all"
                         or (plot_policy == "first_seed" and seed == first_seed)
@@ -517,6 +582,9 @@ def run(
     print(f"\nSaved per-run clustering results to {out_csv}")
     return df
 
+# ============================================================================
+# AGGREGATION & RANKING
+# ============================================================================
 
 def aggregate_and_rank(
     df,
@@ -524,8 +592,11 @@ def aggregate_and_rank(
     out_csv_top=f"{OUT_DIR_TABLES}/clustering_eval_top.csv",
 ):
     """
-    Aggregate across seeds. If only one seed, std is NaN; we fill with 0.0 so it
-    doesn't look scary in tables.
+    Aggregate results across seeds and identify best configurations.
+    
+    Creates:
+    1. Aggregated CSV with mean ± std per (dataset, method, dim, algo)
+    2. Top performers: best config per dataset (ranked by ARI)
     """
     if df.empty:
         print("No rows to aggregate.")
@@ -543,6 +614,7 @@ def aggregate_and_rank(
         .reset_index()
     )
 
+    # If only one seed, std is NaN; fill with 0.0 for cleaner display
     agg["ari_std"] = agg["ari_std"].fillna(0.0)
     agg["sil_std"] = agg["sil_std"].fillna(0.0)
 
@@ -563,9 +635,12 @@ def aggregate_and_rank(
     print(f"Saved top-by-ARI table to {out_csv_top}")
     return agg, top_df
 
+# ============================================================================
+# COMMAND-LINE INTERFACE
+# ============================================================================
 
-# ---------------- CLI ----------------
 def parse_args():
+    """Parse command-line arguments for clustering experiment."""
     p = argparse.ArgumentParser(
         description="Task (b): Clustering of graph embeddings (Graph2Vec, NetLSD, GIN)"
     )
@@ -597,7 +672,7 @@ def parse_args():
         default="first_seed",
         help="Save t-SNE/UMAP plots per (dataset, method, dim).",
     )
-    # GIN hyperparams
+    # GIN hyperparameters
     p.add_argument("--gin_hidden", type=int, default=64)
     p.add_argument("--gin_layers", type=int, default=3)
     p.add_argument("--gin_dropout", type=float, default=0.2)
@@ -606,9 +681,9 @@ def parse_args():
     p.add_argument("--device", type=str, default="cpu")
     return p.parse_args()
 
-
 def main():
-    # keep environment predictable
+    """Main entry point."""
+    # Keep environment predictable
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
 
     args = parse_args()
@@ -629,7 +704,6 @@ def main():
     )
 
     aggregate_and_rank(df)
-
 
 if __name__ == "__main__":
     main()
