@@ -31,7 +31,7 @@ In order to run the script for the first task, please run the following:
 python final_task1.py \
   --datasets ENZYMES MUTAG IMDB-MULTI \
   --methods graph2vec netlsd \
-  --dims 32 64 \
+  --dims 16 32 64 128 256 \
   --seeds 0 1 2 \
   --test_size 0.2 \
   --out report/tables/classification_eval.csv \
@@ -41,7 +41,7 @@ python final_task1.py \
 |---------------|------------------|-----------------|
 | `--datasets` | `ENZYMES MUTAG IMDB-MULTI` | The **graph datasets** to run experiments on. You can include one or multiple datasets from the [TUDataset](https://chrsmrrs.github.io/datasets/docs/datasets/) collection used by PyTorch Geometric.<br> |
 | `--methods` | `graph2vec netlsd` | The **unsupervised graph embedding algorithms** to use.<br>• **graph2vec**: learns embeddings by aggregating graph substructures.<br>• **netlsd**: computes embeddings from Laplacian spectral signatures. |
-| `--dims` | `32 64` | The **embedding dimensions** (vector lengths) to evaluate. You can specify one or several values.<br> |
+| `--dims` | `16 32 64 128 256` | The **embedding dimensions** (vector lengths) to evaluate. You can specify one or several values.<br> |
 | `--seeds` | `0 1 2` | Random seeds for reproducibility. Each seed gives a different train/test split and initialization, allowing you to compute **mean ± std** performance metrics. |
 | `--test_size` | `0.2` | Fraction of the dataset reserved for **testing** (20% test, 80% train by default). Can be changed (e.g. `0.3` for 30% test). |
 | `--out` | `report/tables/classification_eval.csv` | Path to save the **per-run CSV** results. Contains all metrics (accuracy, F1, AUC) and resource usage per (dataset, method, dimension, seed). |
@@ -54,7 +54,7 @@ In order to run the script of the second task, please run the following:
 python3 final_task2.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --methods graph2vec netlsd gin \
-  --dims 32 64 128 \
+  --dims 16 32 64 128 \
   --seeds 0 1 2 \
   --plot_policy first_seed \
   --gin_hidden 64 \
@@ -85,8 +85,8 @@ In order run the code for the third task, please run the following:
 python3 final_task3.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --methods graph2vec netlsd gin \
-  --dims 32 64 \
-  --seeds 0 1 \
+  --dims 16 32 64 128 256\
+  --seeds 0 1 2\
   --levels_edges 0.5 1.0 \
   --levels_attrs 0.5 1.0
 ```
@@ -106,8 +106,8 @@ In order to run the first extra task code, please run the following:
 python3 final_task4.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --methods graph2vec netlsd gin \
-  --dims 32 64 \
-  --seeds 0
+  --dims 16 32 64 128 256\
+  --seeds 0 1 2
 ```
 | **Argument** | **Example Value** | **Description** |
 |---------------|------------------|-----------------|
@@ -123,7 +123,7 @@ python final_task5.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --methods GIN Graph2Vec NetLSD \
   --sample_k 6 \
-  --seed 0 \
+  --seed 0 1 2 \
   --gin_hidden 32 \
   --gin_epochs 15 \
   --gin_mode grad \
