@@ -25,8 +25,8 @@ import os
 import numpy as np
 import pandas as pd
 
-TABLE_CSV = "final_final_report1/tables/classification_eval.csv"
-OUT_DIR_FIGS = "final_final_report1/figures"
+TABLE_CSV = "final_report1/tables/classification_eval.csv"
+OUT_DIR_FIGS = "final_report1/figures"
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
 
 # -------------------------------
