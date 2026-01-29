@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 TABLE_CSV = "final_report2/tables/clustering_eval_agg.csv"
-OUT_DIR_FIGS = "plot_2"
+OUT_DIR_FIGS = "final_report2/figures"
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
 
 # -------------------------------
