@@ -110,8 +110,8 @@ from karateclub import Graph2Vec  # Graph2Vec embedding library
 # OUTPUT DIRECTORIES
 # ============================================================================
 
-OUT_DIR_TABLES = "report_new/tables"
-OUT_DIR_FIGS   = "report_new/figures"
+OUT_DIR_TABLES = "report/tables"
+OUT_DIR_FIGS   = "report/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS,   exist_ok=True)
 

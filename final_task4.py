@@ -97,8 +97,8 @@ if not hasattr(sp, "errstate"):
 # OUTPUT DIRECTORIES
 # ============================================================================
 
-OUT_DIR_TABLES = "report_transfer/tables"
-OUT_DIR_FIGS   = "report_transfer/figures"
+OUT_DIR_TABLES = "report/tables"
+OUT_DIR_FIGS   = "report/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
 
@@ -849,7 +849,9 @@ def plot_scatter_cross(df):
         plt.ylabel(f"Transfer {tag.upper()} (src→tgt)")
         plt.title(f"Cross Transfer vs. Within Performance ({tag.upper()})\n(src != tgt only)")
         plt.tight_layout()
-        plt.savefig(f"{OUT_DIR_FIGS}/transfer_scatter_{tag}_cross_only.png", dpi=150)
+
+        outpath = f"{OUT_DIR_FIGS}/transfer_scatter_{tag}_cross_only.png"
+        plt.savefig(outpath, dpi=150)
         plt.close()
         print(f"  Saved: {outpath}")
 
@@ -908,10 +910,10 @@ def main():
     4. Save results and figures
     
     OUTPUT FILES:
-    - report_transfer/tables/transfer_results.csv: All results
-    - report_transfer/figures/*_heatmap_*.png: Transfer heatmaps
-    - report_transfer/figures/transfer_barplot_*.png: Cross-dataset bars
-    - report_transfer/figures/transfer_scatter_*.png: Within vs transfer
+    - report/tables/transfer_results.csv: All results
+    - report/figures/*_heatmap_*.png: Transfer heatmaps
+    - report/figures/transfer_barplot_*.png: Cross-dataset bars
+    - report/figures/transfer_scatter_*.png: Within vs transfer
     """
     args = parse_args()
     
