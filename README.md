@@ -123,7 +123,7 @@ python final_task5.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --methods GIN Graph2Vec NetLSD \
   --sample_k 6 \
-  --seed 0 1 2 \
+  --seed 0 \
   --gin_hidden 32 \
   --gin_epochs 15 \
   --gin_mode grad \
@@ -150,13 +150,13 @@ python final_task5.py \
 | `--g2v_epochs` | int | `8` | Number of training epochs for Graph2Vec model. |
 | `--g2v_metric` | str | `"cosine"` | Distance metric for Graph2Vec saliency (`"cosine"`, `"relative_l2"`, `"l2"`). |
 | `--netlsd_metric` | str | `"cosine"` | Distance metric for NetLSD saliency. |
-| `--topk_frac` | float | `0.0` | Fraction of most salient nodes to outline in red (e.g., `0.1` = top 10%). |
+| `--topk_frac` | float | `0.1` | Fraction of most salient nodes to outline in red (e.g., `0.1` = top 10%). |
 | `--norm_mode` | str | `"minmax"` | Normalization type for saliency values (`"minmax"`, `"mean"`, `"none"`). |
 
 # Extra Task 3) Causal Node Importance
 In order to run the third extra task, please run the following: 
 ```bash
-python3 counterfactual_graph_explanations.py \
+python3 final_task6.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --seed 0
 ```
@@ -169,7 +169,7 @@ python3 counterfactual_graph_explanations.py \
 # Extra Task 4) Combined Embeddings
 In order to run the thrid extra task, please run the following:
 ```bash
-python final_task9.py \
+python final_task7.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
   --combos graph2vec+netlsd graph2vec+gin netlsd+gin graph2vec+netlsd+gin \
   --dims 16 32 64 128 256 \
