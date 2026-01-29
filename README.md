@@ -167,7 +167,7 @@ python3 final_task6.py \
 | `--seed` | int | `0` | Random seed for reproducibility of model training and saliency computation. |
 
 # Extra Task 4) Combined Embeddings
-In order to run the thrid extra task, please run the following:
+In order to run the fourth extra task, please run the following:
 ```bash
 python final_task7.py \
   --datasets MUTAG ENZYMES IMDB-MULTI \
