@@ -97,9 +97,9 @@ from karateclub import Graph2Vec
 # OUTPUT DIRECTORIES
 # ============================================================================
 
-OUT_DIR_TABLES = "report/tables"
-OUT_DIR_FIGS   = "report/figures"
-OUT_DIR_LOGS   = "report/logs"
+OUT_DIR_TABLES = "final_report7/tables"
+OUT_DIR_FIGS   = "final_report7/figures"
+OUT_DIR_LOGS   = "final_report7/logs"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS,   exist_ok=True)
 os.makedirs(OUT_DIR_LOGS,   exist_ok=True)

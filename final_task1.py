@@ -85,11 +85,11 @@ from karateclub import Graph2Vec  # Unsupervised graph embedding
 # OUTPUT DIRECTORIES
 # ============================================================================
 
-OUT_DIR_TABLES = "report/tables"
-OUT_DIR_FIGS   = "report/figures"
+OUT_DIR_TABLES = "final_report1/tables"
+OUT_DIR_FIGS   = "final_report1/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
-os.makedirs("report/logs", exist_ok=True)
+os.makedirs("final_report1/logs", exist_ok=True)
 
 # ============================================================================
 # UTILITY FUNCTIONS

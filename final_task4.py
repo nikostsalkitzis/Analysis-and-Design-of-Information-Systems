@@ -97,8 +97,8 @@ if not hasattr(sp, "errstate"):
 # OUTPUT DIRECTORIES
 # ============================================================================
 
-OUT_DIR_TABLES = "report/tables"
-OUT_DIR_FIGS   = "report/figures"
+OUT_DIR_TABLES = "final_report4/tables"
+OUT_DIR_FIGS   = "final_report4/figures"
 os.makedirs(OUT_DIR_TABLES, exist_ok=True)
 os.makedirs(OUT_DIR_FIGS, exist_ok=True)
 
